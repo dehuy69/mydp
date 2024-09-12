@@ -6,22 +6,24 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-func CreateAccessToken(data map[string]interface{}, expiresDelta time.Duration, SECRET_KEY []byte) (string, error) {
-	claims := jwt.MapClaims{}
-	for key, value := range data {
-		claims[key] = value
-	}
+// Claims cấu trúc cho các thông tin lưu trong JWT token
+type Claims struct {
+	Username string `json:"username"`
+	jwt.RegisteredClaims
+}
 
-	var expire time.Time
-	if expiresDelta > 0 {
-		expire = time.Now().Add(expiresDelta * time.Second)
-	} else {
-		expire = time.Now().Add(15 * time.Minute)
+func CreateAccessToken(username, jwtSecret string) (string, error) {
+	expirationTime := time.Now().Add(time.Hour * 24 * 365 * 100) // Set the expiration time to 100 year from now
+
+	claims := &Claims{
+		Username: username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(expirationTime),
+		},
 	}
-	claims["exp"] = expire.Unix()
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	encodedJWT, err := token.SignedString(SECRET_KEY)
+	encodedJWT, err := token.SignedString([]byte(jwtSecret))
 	if err != nil {
 		return "", err
 	}

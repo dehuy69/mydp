@@ -2,3 +2,4 @@
 # collection_folder: "./data/collection"
 # table_folder: "./data/table"
 data_folder_default: "./data"
+jwt_secret: "my2025dp"

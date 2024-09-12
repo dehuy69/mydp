@@ -10,6 +10,8 @@ import (
 // Config struct chứa cấu hình đường dẫn cho SQLite, Badger, và Parquet
 type Config struct {
 	DataFolderDefault string `mapstructure:"data_folder_default" envconfig:"DATA_FOLDER_DEFAULT"`
+	JWTSecret         string `mapstructure:"jwt_secret" envconfig:"JWT_SECRET"`
+	JWTDuration       int    `mapstructure:"jwt_duration" envconfig:"JWT_DURATION"`
 }
 
 // LoadConfig tải cấu hình từ file YAML và biến môi trường
@@ -41,6 +43,8 @@ func LoadConfig() *Config {
 
 	// Kiểm tra cấu hình đã tải
 	fmt.Println("Data folder:", config.DataFolderDefault)
+	fmt.Println("JWT secret:", config.JWTSecret)
+	fmt.Println("JWT duration:", config.JWTDuration)
 
 	return &config
 }

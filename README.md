@@ -27,5 +27,5 @@ MyDP is an open-source database platform that supports multi-region deployments,
 
 1. Clone the repository:
    ```sh
-   git clone https://github.com/yourusername/mydp.git
+   git clone https://github.com/dehuy69/mydp.git
    cd mydp

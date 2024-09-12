@@ -1,0 +1,3 @@
+sqlite_file: "./data/mydatabase.db"
+badger_file: "./data/mybadger"
+parquet_folder: "./data/parquet"

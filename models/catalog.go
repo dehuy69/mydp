@@ -28,47 +28,49 @@ type UserPermission struct {
 // Workspace struct đại diện cho một workspace trong catalog
 type Workspace struct {
 	gorm.Model
-	ID        int    `json:"id"`         // ID của workspace
-	Name      string `json:"name"`       // Tên của workspace
-	Owner     string `json:"owner"`      // Chủ sở hữu của workspace
-	CreatedAt string `json:"created_at"` // Thời gian tạo workspace
+	Name        string       `json:"name" gorm:"unique;not null"` // Tên của workspace
+	OwnerID     int          `json:"owner_id" gorm:"not null"`    // ID của chủ sở hữu workspace
+	Owner       User         `gorm:"foreignKey:OwnerID"`          // Tham chiếu đến người dùng chủ sở hữu
+	Collections []Collection `json:"collections"`                 // Danh sách các collections trong workspace
+	Tables      []Table      `json:"tables"`                      // Danh sách các tables trong workspace
+	Pipelines   []Pipeline   `json:"pipelines"`                   // Danh sách các pipelines trong workspace
 }
 
 // Collection struct đại diện cho một bảng OLTP trong workspace
 type Collection struct {
 	gorm.Model
-	ID          int    `json:"id"`           // ID của collection
-	Name        string `json:"name"`         // Tên của collection
-	WorkspaceID int    `json:"workspace_id"` // ID của workspace chứa collection này
-	CreatedAt   string `json:"created_at"`   // Thời gian tạo collection
+	Name        string    `json:"name" gorm:"unique;not null"`  // Tên của collection
+	WorkspaceID int       `json:"workspace_id" gorm:"not null"` // ID của workspace chứa collection này
+	Workspace   Workspace `gorm:"foreignKey:WorkspaceID"`       // Tham chiếu đến workspace
+	Indexes     []Index   `json:"indexes"`                      // Danh sách các chỉ mục trong collection
 }
 
 // Table struct đại diện cho một bảng OLAP trong workspace
 type Table struct {
 	gorm.Model
-	ID          int    `json:"id"`           // ID của table
-	Name        string `json:"name"`         // Tên của table
-	WorkspaceID int    `json:"workspace_id"` // ID của workspace chứa table này
-	CreatedAt   string `json:"created_at"`   // Thời gian tạo table
+	Name        string    `json:"name" gorm:"unique;not null"`  // Tên của table
+	WorkspaceID int       `json:"workspace_id" gorm:"not null"` // ID của workspace chứa table này
+	Workspace   Workspace `gorm:"foreignKey:WorkspaceID"`       // Tham chiếu đến workspace
+	Indexes     []Index   `json:"indexes"`                      // Danh sách các chỉ mục trong table
 }
 
 // Index struct đại diện cho một chỉ mục trong một collection hoặc table
 type Index struct {
 	gorm.Model
-	ID        int    `json:"id"`         // ID của chỉ mục
-	Name      string `json:"name"`       // Tên của chỉ mục
-	TableID   int    `json:"table_id"`   // ID của collection hoặc table chứa chỉ mục này
-	IndexType string `json:"index_type"` // Loại chỉ mục (ví dụ: B-Tree, Hash, Inverted Index)
-	CreatedAt string `json:"created_at"` // Thời gian tạo chỉ mục
+	Name         string      `json:"name" gorm:"not null"`       // Tên của chỉ mục
+	TableID      *int        `json:"table_id"`                   // ID của table chứa chỉ mục này (nếu có)
+	CollectionID *int        `json:"collection_id"`              // ID của collection chứa chỉ mục này (nếu có)
+	IndexType    string      `json:"index_type" gorm:"not null"` // Loại chỉ mục (ví dụ: B-Tree, Hash, Inverted Index)
+	Table        *Table      `gorm:"foreignKey:TableID"`         // Tham chiếu đến bảng
+	Collection   *Collection `gorm:"foreignKey:CollectionID"`    // Tham chiếu đến collection
 }
 
 // Pipeline struct đại diện cho một pipeline trong workspace
 type Pipeline struct {
 	gorm.Model
-	ID          int    `json:"id"`           // ID của pipeline
-	Name        string `json:"name"`         // Tên của pipeline
-	WorkspaceID int    `json:"workspace_id"` // ID của workspace chứa pipeline này
-	Notebook    string `json:"notebook"`     // Đường dẫn tới Jupyter Notebook
-	Schedule    string `json:"schedule"`     // Lịch trình chạy pipeline
-	CreatedAt   string `json:"created_at"`   // Thời gian tạo pipeline
+	Name        string    `json:"name" gorm:"unique;not null"`  // Tên của pipeline
+	WorkspaceID int       `json:"workspace_id" gorm:"not null"` // ID của workspace chứa pipeline này
+	Workspace   Workspace `gorm:"foreignKey:WorkspaceID"`       // Tham chiếu đến workspace
+	Notebook    string    `json:"notebook" gorm:"not null"`     // Đường dẫn tới Jupyter Notebook
+	Schedule    string    `json:"schedule"`                     // Lịch trình chạy pipeline
 }

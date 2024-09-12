@@ -44,7 +44,6 @@ func LoadConfig() *Config {
 	// Kiểm tra cấu hình đã tải
 	fmt.Println("Data folder:", config.DataFolderDefault)
 	fmt.Println("JWT secret:", config.JWTSecret)
-	fmt.Println("JWT duration:", config.JWTDuration)
 
 	return &config
 }

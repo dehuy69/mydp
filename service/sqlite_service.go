@@ -1,20 +1,29 @@
-package sqlite_service
+package service
 
 import (
 	"github.com/dehuy69/mydp/config"
 	"github.com/dehuy69/mydp/models"
+	"github.com/dehuy69/mydp/utils"
+
+	"path/filepath"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
-type SQLiteManager struct {
+type SQLiteService struct {
 	db *gorm.DB
 }
 
-func NewSQLiteManager(cfg *config.Config) (*SQLiteManager, error) {
+func NewSQLiteService(cfg *config.Config) (*SQLiteService, error) {
+	// Path to SQLite database file
+	path := filepath.Join(cfg.DataFolderDefault, "catalog", "sqlite3.db")
+
+	// Create the folders if not exist
+	utils.EnsureFolder(filepath.Dir(path))
+
 	// Mở kết nối tới SQLite bằng GORM
-	db, err := gorm.Open(sqlite.Open(cfg.SQLiteFile), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
 	if err != nil {
 		return nil, err
 	}
@@ -26,7 +35,7 @@ func NewSQLiteManager(cfg *config.Config) (*SQLiteManager, error) {
 	}
 
 	// Khởi tạo SQLiteManager
-	manager := &SQLiteManager{db: db}
+	manager := &SQLiteService{db: db}
 
 	// Tạo người dùng admin mặc định nếu chưa tồn tại
 	err = manager.createDefaultAdminUser()
@@ -50,13 +59,14 @@ func autoMigrate(db *gorm.DB) error {
 }
 
 // createDefaultAdminUser tạo người dùng admin mặc định nếu chưa tồn tại
-func (m *SQLiteManager) createDefaultAdminUser() error {
+func (m *SQLiteService) createDefaultAdminUser() error {
 	var user models.User
 	result := m.db.First(&user, "username = ?", "admin")
 	if result.Error == gorm.ErrRecordNotFound {
+		hashedPassword, _ := utils.HashPassword("admin_password")
 		adminUser := models.User{
 			Username: "admin",
-			Password: "admin_password", // Bạn nên mã hóa mật khẩu này
+			Password: hashedPassword, // Bạn nên mã hóa mật khẩu này
 			Role:     "admin",
 		}
 		return m.db.Create(&adminUser).Error
@@ -65,7 +75,7 @@ func (m *SQLiteManager) createDefaultAdminUser() error {
 }
 
 // Close đóng kết nối cơ sở dữ liệu
-func (m *SQLiteManager) Close() error {
+func (m *SQLiteService) Close() error {
 	sqlDB, err := m.db.DB()
 	if err != nil {
 		return err
@@ -74,7 +84,7 @@ func (m *SQLiteManager) Close() error {
 }
 
 // AddUser thêm người dùng mới với mật khẩu đã mã hóa
-func (m *SQLiteManager) AddUser(username, password, role string) error {
+func (m *SQLiteService) AddUser(username, password, role string) error {
 	user := models.User{
 		Username: username,
 		Password: password, // Bạn nên mã hóa mật khẩu này
@@ -84,11 +94,16 @@ func (m *SQLiteManager) AddUser(username, password, role string) error {
 }
 
 // GetUser lấy thông tin người dùng từ cơ sở dữ liệu
-func (m *SQLiteManager) GetUser(username string) (*models.User, error) {
+func (m *SQLiteService) GetUser(username string) (*models.User, error) {
 	var user models.User
 	result := m.db.First(&user, "username = ?", username)
 	if result.Error != nil {
 		return nil, result.Error
 	}
 	return &user, nil
+}
+
+// CreateCollection tạo một collection mới
+func (m *SQLiteService) CreateCollection(collection *models.Collection) error {
+	return m.db.Create(collection).Error
 }

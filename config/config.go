@@ -9,9 +9,7 @@ import (
 
 // Config struct chứa cấu hình đường dẫn cho SQLite, Badger, và Parquet
 type Config struct {
-	SQLiteFile    string `mapstructure:"sqlite_file" envconfig:"SQLITE_FILE"`
-	BadgerFile    string `mapstructure:"badger_file" envconfig:"BADGER_FILE"`
-	ParquetFolder string `mapstructure:"parquet_folder" envconfig:"PARQUET_FOLDER"`
+	DataFolderDefault string `mapstructure:"data_folder_default" envconfig:"DATA_FOLDER_DEFAULT"`
 }
 
 // LoadConfig tải cấu hình từ file YAML và biến môi trường
@@ -42,9 +40,7 @@ func LoadConfig() *Config {
 	}
 
 	// Kiểm tra cấu hình đã tải
-	fmt.Println("SQLite File:", config.SQLiteFile)
-	fmt.Println("Badger File:", config.BadgerFile)
-	fmt.Println("Parquet Folder:", config.ParquetFolder)
+	fmt.Println("Data folder:", config.DataFolderDefault)
 
 	return &config
 }

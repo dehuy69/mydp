@@ -2,10 +2,10 @@ package main
 
 import (
 	"log"
+	"os"
 
-	"github.com/dehuy69/mydp/api"
 	"github.com/dehuy69/mydp/config"
-	"github.com/dehuy69/mydp/service/sqlite_service"
+	"github.com/dehuy69/mydp/controller"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,24 +17,36 @@ func main() {
 		log.Fatal("Failed to load configuration.")
 	}
 
-	// Khởi tạo SQLiteManager với đối tượng config.Config
-	sqliteManager, err := sqlite_service.NewSQLiteManager(cfg)
+	//Khởi tạo controller với đối tượng config.Config
+	controller, err := controller.NewController(cfg)
 	if err != nil {
-		log.Fatalf("Failed to initialize SQLite manager: %v", err)
+		log.Fatalf("Failed to initialize controller: %v", err)
 	}
-	defer sqliteManager.Close()
 
 	// Khởi tạo router Gin
 	r := gin.Default()
 
-	// Đăng ký route cho API đăng nhập
-	r.POST("/api/admin/login", func(c *gin.Context) {
-		api.AdminLoginHandler(c, sqliteManager)
-	})
+	publicR := r.Group("/api")
+	{
+		// Đăng ký route cho API đăng ký
+		publicR.POST("/login", controller.LoginHandler)
+		publicR.POST("/collection", controller.CreateCollectionHandler)
+	}
 
 	// Chạy server
-	log.Println("Starting server on :8080...")
-	if err := r.Run(":8080"); err != nil {
+	log.Println("Starting server on :19450...")
+	if err := r.Run(":19450"); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
+}
+
+// createDataFolder tạo folder ./data nếu chưa tồn tại
+func createDataFolder() error {
+	const dataFolder = "./data"
+	if _, err := os.Stat(dataFolder); os.IsNotExist(err) {
+		if err := os.Mkdir(dataFolder, os.ModePerm); err != nil {
+			return err
+		}
+	}
+	return nil
 }

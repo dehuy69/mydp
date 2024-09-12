@@ -1,3 +1,4 @@
-sqlite_file: "./data/mydatabase.db"
-badger_file: "./data/mybadger"
-parquet_folder: "./data/parquet"
+# catalog_file: "./data/catalog/catalog.db"
+# collection_folder: "./data/collection"
+# table_folder: "./data/table"
+data_folder_default: "./data"

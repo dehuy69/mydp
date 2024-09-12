@@ -20,7 +20,7 @@ MyDP is an open-source database platform that supports multi-region deployments,
 
 - Go 1.16 or higher
 - BadgerDB
-- Parquet
+- DuckDB, Parquet
 - SQLite3
 
 ### Installation

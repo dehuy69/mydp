@@ -2,7 +2,7 @@ package service
 
 import (
 	"github.com/dehuy69/mydp/config"
-	"github.com/dehuy69/mydp/models"
+	"github.com/dehuy69/mydp/main_server/models"
 	"github.com/dehuy69/mydp/utils"
 
 	"path/filepath"

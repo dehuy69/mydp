@@ -7,22 +7,19 @@ import (
 // User struct đại diện cho một người dùng trong hệ thống
 type User struct {
 	gorm.Model
-	ID        int    `json:"id"`         // ID của người dùng
-	Username  string `json:"username"`   // Tên đăng nhập của người dùng
-	Password  string `json:"password"`   // Mật khẩu đã mã hóa
-	Role      string `json:"role"`       // Vai trò của người dùng (Admin, User, etc.)
-	CreatedAt string `json:"created_at"` // Thời gian tạo người dùng
+	Username        string           `json:"username" gorm:"unique;not null"` // Tên đăng nhập của người dùng
+	Password        string           `json:"password" gorm:"not null"`        // Mật khẩu đã mã hóa
+	Role            string           `json:"role" gorm:"not null"`            // Vai trò của người dùng (Admin, User, etc.)
+	UserPermissions []UserPermission `json:"permissions"`                     // Danh sách quyền của người dùng
 }
 
 // UserPermission struct đại diện cho quyền truy cập của người dùng vào một cơ sở dữ liệu hoặc bảng
 type UserPermission struct {
 	gorm.Model
-	ID         int    `json:"id"`          // ID của quyền truy cập
-	UserID     int    `json:"user_id"`     // ID của người dùng
-	DatabaseID int    `json:"database_id"` // ID của cơ sở dữ liệu
-	TableID    int    `json:"table_id"`    // ID của bảng (nếu áp dụng)
-	Permission string `json:"permission"`  // Quyền truy cập (READ, WRITE, ADMIN, etc.)
-	GrantedAt  string `json:"granted_at"`  // Thời gian cấp quyền
+	UserID      int    `json:"user_id" gorm:"not null"`      // ID của người dùng
+	WorkspaceID int    `json:"workspace_id" gorm:"not null"` // ID của workspace
+	Permission  string `json:"permission" gorm:"not null"`   // Quyền truy cập (READ, WRITE, ADMIN, etc.)
+	User        User   `gorm:"foreignKey:UserID"`            // Tham chiếu đến người dùng
 }
 
 // Workspace struct đại diện cho một workspace trong catalog
@@ -36,13 +33,36 @@ type Workspace struct {
 	Pipelines   []Pipeline   `json:"pipelines"`                   // Danh sách các pipelines trong workspace
 }
 
-// Collection struct đại diện cho một bảng OLTP trong workspace
+// Collection struct đại diện cho một bảng OLTP trong workspace với hỗ trợ sharding
 type Collection struct {
 	gorm.Model
-	Name        string    `json:"name" gorm:"unique;not null"`  // Tên của collection
-	WorkspaceID int       `json:"workspace_id" gorm:"not null"` // ID của workspace chứa collection này
-	Workspace   Workspace `gorm:"foreignKey:WorkspaceID"`       // Tham chiếu đến workspace
-	Indexes     []Index   `json:"indexes"`                      // Danh sách các chỉ mục trong collection
+	Name          string    `json:"name" gorm:"unique;not null"`    // Tên của collection
+	WorkspaceID   int       `json:"workspace_id" gorm:"not null"`   // ID của workspace chứa collection này
+	Workspace     Workspace `gorm:"foreignKey:WorkspaceID"`         // Tham chiếu đến workspace
+	ShardKey      string    `json:"shard_key" gorm:"not null"`      // Khóa để thực hiện sharding
+	ShardStrategy string    `json:"shard_strategy" gorm:"not null"` // Chiến lược sharding (range, hash, list, etc.)
+	Shards        []Shard   `json:"shards"`                         // Danh sách các shards
+	Indexes       []Index   `json:"indexes"`                        // Danh sách các chỉ mục trong collection
+}
+
+// Server struct đại diện cho một máy chủ nơi các shards được triển khai
+type Server struct {
+	gorm.Model
+	Host        string  `json:"host" gorm:"unique;not null"`  // Địa chỉ host hoặc IP của server
+	IsLocalhost bool    `json:"is_localhost" gorm:"not null"` // Đánh dấu nếu đây là localhost
+	Shards      []Shard `json:"shards"`                       // Danh sách các shards được triển khai trên server này
+}
+
+// Shard struct đại diện cho thông tin về một shard trong Collection
+type Shard struct {
+	gorm.Model
+	CollectionID int    `json:"collection_id" gorm:"not null"` // ID của collection chứa shard này
+	ShardNumber  int    `json:"shard_number" gorm:"not null"`  // Số thứ tự của shard trong collection
+	ShardKey     string `json:"shard_key" gorm:"not null"`     // Giá trị của shard key
+	ServerID     int    `json:"server_id" gorm:"not null"`     // ID của server chứa shard này
+	Server       Server `gorm:"foreignKey:ServerID"`           // Tham chiếu đến server
+	Status       string `json:"status" gorm:"not null"`        // Trạng thái của shard (active, inactive, etc.)
+	Size         int64  `json:"size"`                          // Kích thước của shard
 }
 
 // Table struct đại diện cho một bảng OLAP trong workspace

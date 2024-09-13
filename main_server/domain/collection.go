@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dehuy69/mydp/models"
-	"github.com/dehuy69/mydp/service"
+	"github.com/dehuy69/mydp/main_server/models"
+	"github.com/dehuy69/mydp/main_server/service"
 )
 
 // CollectionWrapper là struct bọc để thêm các phương thức vào Collection

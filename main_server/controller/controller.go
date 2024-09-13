@@ -2,7 +2,7 @@ package controller
 
 import (
 	"github.com/dehuy69/mydp/config"
-	"github.com/dehuy69/mydp/service"
+	"github.com/dehuy69/mydp/main_server/service"
 )
 
 type Controller struct {

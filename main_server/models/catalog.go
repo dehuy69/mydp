@@ -36,6 +36,7 @@ type Workspace struct {
 // Collection struct đại diện cho một bảng OLTP trong workspace với hỗ trợ sharding
 type Collection struct {
 	gorm.Model
+	ID            int       `json:"id"`                             // ID của collection
 	Name          string    `json:"name" gorm:"unique;not null"`    // Tên của collection
 	WorkspaceID   int       `json:"workspace_id" gorm:"not null"`   // ID của workspace chứa collection này
 	Workspace     Workspace `gorm:"foreignKey:WorkspaceID"`         // Tham chiếu đến workspace
@@ -43,14 +44,6 @@ type Collection struct {
 	ShardStrategy string    `json:"shard_strategy" gorm:"not null"` // Chiến lược sharding (range, hash, list, etc.)
 	Shards        []Shard   `json:"shards"`                         // Danh sách các shards
 	Indexes       []Index   `json:"indexes"`                        // Danh sách các chỉ mục trong collection
-}
-
-// Server struct đại diện cho một máy chủ nơi các shards được triển khai
-type Server struct {
-	gorm.Model
-	Host        string  `json:"host" gorm:"unique;not null"`  // Địa chỉ host hoặc IP của server
-	IsLocalhost bool    `json:"is_localhost" gorm:"not null"` // Đánh dấu nếu đây là localhost
-	Shards      []Shard `json:"shards"`                       // Danh sách các shards được triển khai trên server này
 }
 
 // Shard struct đại diện cho thông tin về một shard trong Collection
@@ -81,6 +74,9 @@ type Index struct {
 	TableID      *int        `json:"table_id"`                   // ID của table chứa chỉ mục này (nếu có)
 	CollectionID *int        `json:"collection_id"`              // ID của collection chứa chỉ mục này (nếu có)
 	IndexType    string      `json:"index_type" gorm:"not null"` // Loại chỉ mục (ví dụ: B-Tree, Hash, Inverted Index)
+	Status       string      `json:"status" gorm:"not null"`     // Trạng thái của chỉ mục (active, building, etc.)
+	ServerID     int         `json:"server_id"`                  // ID của Index Worker Server chịu trách nhiệm xử lý chỉ mục này
+	Server       Server      `gorm:"foreignKey:ServerID"`        // Tham chiếu đến server Index Worker
 	Table        *Table      `gorm:"foreignKey:TableID"`         // Tham chiếu đến bảng
 	Collection   *Collection `gorm:"foreignKey:CollectionID"`    // Tham chiếu đến collection
 }
@@ -93,4 +89,27 @@ type Pipeline struct {
 	Workspace   Workspace `gorm:"foreignKey:WorkspaceID"`       // Tham chiếu đến workspace
 	Notebook    string    `json:"notebook" gorm:"not null"`     // Đường dẫn tới Jupyter Notebook
 	Schedule    string    `json:"schedule"`                     // Lịch trình chạy pipeline
+}
+
+// Server struct đại diện cho một máy chủ nơi các shards được triển khai
+type Server struct {
+	gorm.Model
+	Host        string  `json:"host" gorm:"unique;not null"`  // Địa chỉ host hoặc IP của server
+	ClusterID   int     `json:"cluster_id" gorm:"not null"`   // ID của cluster mà server thuộc về
+	Cluster     Cluster `gorm:"foreignKey:ClusterID"`         // Tham chiếu đến cụm chứa server này
+	ServerType  string  `json:"server_type" gorm:"not null"`  // Loại server (main, worker, index, etc.)
+	IsLocalhost bool    `json:"is_localhost" gorm:"not null"` // Đánh dấu nếu đây là localhost
+	Status      string  `json:"status" gorm:"not null"`       // Trạng thái của server (active, inactive, etc.)
+	Shards      []Shard `json:"shards"`                       // Danh sách các shards được triển khai trên server này
+	Indexes     []Index `json:"indexes"`                      // Danh sách các chỉ mục được triển khai trên server này
+}
+
+// Cluster struct đại diện cho cụm máy chủ chính hoặc backup
+type Cluster struct {
+	gorm.Model
+	Name          string   `json:"name" gorm:"unique;not null"` // Tên của cụm
+	Type          string   `json:"type" gorm:"not null"`        // Loại cụm (Main, Backup)
+	Servers       []Server `json:"servers"`                     // Danh sách các servers trong cụm
+	Active        bool     `json:"active" gorm:"not null"`      // Đánh dấu nếu cụm này đang hoạt động (Main hoặc Backup)
+	FailoverOrder int      `json:"failover_order"`              // Thứ tự failover nếu có nhiều backup clusters
 }

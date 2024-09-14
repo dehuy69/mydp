@@ -10,6 +10,7 @@ type Controller struct {
 	SQliteService *service.SQLiteService
 	BadgerService *service.BadgerService
 	PhoneService  *service.ParquetService
+	QueueManager  *service.QueueManager
 }
 
 func NewController(config *config.Config) (*Controller, error) {
@@ -28,11 +29,15 @@ func NewController(config *config.Config) (*Controller, error) {
 		return nil, err
 	}
 
+	// khởi taon internal message queue
+	queueManager := service.NewQueueManager()
+
 	return &Controller{
 		config:        config,
 		SQliteService: sqliteService,
 		BadgerService: badgerService,
 		PhoneService:  parquetService,
+		QueueManager:  queueManager,
 	}, nil
 }
 

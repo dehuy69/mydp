@@ -1,3 +1,5 @@
+// main.go
+
 package main
 
 import (
@@ -10,53 +12,55 @@ import (
 	"time"
 
 	"github.com/dehuy69/mydp/config"
-	"github.com/dehuy69/mydp/main_server/controller"
-	"github.com/gin-gonic/gin"
+	consumer "github.com/dehuy69/mydp/main_server/consumer/write-collection"
+	"github.com/dehuy69/mydp/main_server/router" // Import the new router package
 )
 
 func main() {
-	// Tải cấu hình
+	// Load configuration
 	cfg := config.LoadConfig()
 	if cfg == nil {
 		log.Fatal("Failed to load configuration.")
 	}
 
-	// Khởi tạo controller với đối tượng config.Config
-	ctrl, err := controller.NewController(cfg)
-	if err != nil {
-		log.Fatalf("Failed to initialize controller: %v", err)
-	}
+	// Initialize controller with config.Config object
+	ctrl := router.InitializeController(cfg)
 
-	// Khởi tạo router Gin
-	r := gin.Default()
+	// Initialize Gin router
+	r := router.SetupRouter(ctrl)
 
-	publicR := r.Group("/api")
-	{
-		// Đăng ký route cho API đăng ký
-		publicR.POST("/login", ctrl.LoginHandler)
-		publicR.POST("/collection", ctrl.CreateCollectionHandler)
-	}
-
-	// Tạo server với cấu hình timeout
+	// Create server with timeout settings
 	srv := &http.Server{
 		Addr:    ":19450",
 		Handler: r,
 	}
 
-	// Chạy server trong một goroutine để không chặn việc lắng nghe tín hiệu
+	// Run server in a goroutine to avoid blocking signal listening
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}
 	}()
 
-	// Lắng nghe tín hiệu hệ thống để thực hiện graceful shutdown
+	// Initialize and run write-collection consumer in a goroutine
+	consumerService, err := consumer.NewWriteCollectionConsumer(cfg)
+	if err != nil {
+		log.Fatalf("Failed to initialize consumer service: %v", err)
+	}
+
+	go func() {
+		if err := consumerService.Start(); err != nil {
+			log.Fatalf("Failed to start consumer service: %v", err)
+		}
+	}()
+
+	// Listen for system signals to perform graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Println("Shutting down server...")
 
-	// Tạo context với timeout để server có thời gian hoàn thành các request đang xử lý
+	// Create a context with a timeout to give the server time to finish processing ongoing requests
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {

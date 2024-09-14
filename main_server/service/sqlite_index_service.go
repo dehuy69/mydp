@@ -1,28 +1,27 @@
 package service
 
 import (
-	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/dehuy69/mydp/main_server/models"
-	_ "github.com/mattn/go-sqlite3"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
 type SQLiteIndexService struct {
 	DB            *gorm.DB
 	BadgerService *BadgerService
-	Connections   map[string]*sql.DB
+	Connections   map[string]*gorm.DB
 }
 
 func NewSQLiteIndexService(db *gorm.DB, badgerService *BadgerService) *SQLiteIndexService {
 	return &SQLiteIndexService{
 		DB:            db,
 		BadgerService: badgerService,
-		Connections:   make(map[string]*sql.DB),
+		Connections:   make(map[string]*gorm.DB),
 	}
 }
 
@@ -40,10 +39,10 @@ func (s *SQLiteIndexService) EnsureIndexes() error {
 			return fmt.Errorf("failed to ensure db file for collection %d: %v", *index.CollectionID, err)
 		}
 
-		// Mở kết nối đến SQLite database
-		db, err := sql.Open("sqlite3", dbPath)
+		// Khởi tạo kết nối cơ sở dữ liệu bằng GORM
+		db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 		if err != nil {
-			return fmt.Errorf("failed to open sqlite db for collection %d: %v", *index.CollectionID, err)
+			log.Fatalf("failed to connect database: %v", err)
 		}
 
 		// Đảm bảo table trùng tên với index đã được tạo hoặc tồn tại
@@ -77,46 +76,15 @@ func (s *SQLiteIndexService) ensureDBFile(dbPath string) error {
 	return nil
 }
 
-func (s *SQLiteIndexService) ensureTable(db *sql.DB, index models.Index) error {
-	// Tạo câu lệnh SQL để tạo table nếu chưa tồn tại
-	fields := strings.Split(index.Fields, ",")
-	fieldDefinitions := make([]string, len(fields))
-	for i, field := range fields {
-		fieldDefinitions[i] = fmt.Sprintf("%s TEXT", field)
+func (s *SQLiteIndexService) ensureTable(db *gorm.DB, index models.Index) error {
+	// Tạo table sử dụng model.IndexTableStruct với tên table là index.Name
+	if err := db.Table(index.Name).AutoMigrate(&models.IndexTableStruct{}); err != nil {
+		return fmt.Errorf("failed to auto migrate table: %v", err)
 	}
-	// Thêm cột key để xác định vị trí data trong Badger
-	fieldDefinitions = append(fieldDefinitions, "key TEXT")
-	fieldDefinitionsSQL := strings.Join(fieldDefinitions, ", ")
-	primaryKeySQL := strings.Join(fields, ", ")
-
-	uniqueConstraint := ""
-	if index.IsUnique {
-		uniqueConstraint = fmt.Sprintf(", UNIQUE (%s)", primaryKeySQL)
-	}
-
-	createTableSQL := fmt.Sprintf(`
-        CREATE TABLE IF NOT EXISTS %s (
-            %s,
-            PRIMARY KEY (%s)
-            %s
-        );
-    `, index.Name, fieldDefinitionsSQL, primaryKeySQL, uniqueConstraint)
-
-	_, err := db.Exec(createTableSQL)
-	if err != nil {
-		return fmt.Errorf("failed to create table %s: %v", index.Name, err)
-	}
-
 	return nil
 }
 
-func (s *SQLiteIndexService) CloseConnections() {
-	for _, db := range s.Connections {
-		db.Close()
-	}
-}
-
-// Thêm hàm tạo mới một index trong một collection
+// Thêm hàm tạo mới một bảng index trong một collection
 func (s *SQLiteIndexService) CreateIndex(collectionID int, indexName string, fields string, isUnique bool) error {
 	// Tạo một đối tượng Index mới
 	index := models.Index{
@@ -137,15 +105,15 @@ func (s *SQLiteIndexService) CreateIndex(collectionID int, indexName string, fie
 		return fmt.Errorf("failed to ensure db file for collection %d: %v", collectionID, err)
 	}
 
-	// Mở kết nối đến SQLite database
-	db, err := sql.Open("sqlite3", dbPath)
+	// Khởi tạo kết nối cơ sở dữ liệu bằng GORM
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	if err != nil {
-		return fmt.Errorf("failed to open sqlite db for collection %d: %v", collectionID, err)
+		log.Fatalf("failed to connect database: %v", err)
 	}
 
-	// Đảm bảo table trùng tên với index đã được tạo hoặc tồn tại
-	if err := s.ensureTable(db, index); err != nil {
-		return fmt.Errorf("failed to ensure table for index %s: %v", indexName, err)
+	// Tạo table mới, tên table là indexName
+	if err := db.Table(index.Name).AutoMigrate(&models.IndexTableStruct{}); err != nil {
+		return fmt.Errorf("failed to auto migrate table: %v", err)
 	}
 
 	// Lưu kết nối vào mảng Connections
@@ -155,7 +123,7 @@ func (s *SQLiteIndexService) CreateIndex(collectionID int, indexName string, fie
 }
 
 // Trả về kết nối đến SQLite database của một collection
-func (s *SQLiteIndexService) GetConnection(collectionID int) (*sql.DB, error) {
+func (s *SQLiteIndexService) GetConnection(collectionID int) (*gorm.DB, error) {
 	dbPath := filepath.Join("data", "index", fmt.Sprintf("%d.db", collectionID))
 	db, ok := s.Connections[dbPath]
 	if !ok {

@@ -3,6 +3,7 @@ package domain
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/dehuy69/mydp/main_server/models"
 	service "github.com/dehuy69/mydp/main_server/service"
@@ -116,20 +117,37 @@ func (cw *CollectionWrapper) CheckIndexConstraints(input map[string]interface{})
 	}
 
 	// Lấy kết nối đến SQLite index service của collection
-	collection_index_service, err := cw.SQLiteIndexService.GetConnection(cw.Collection.ID)
+	dbclient_collection, err := cw.SQLiteIndexService.GetConnection(cw.Collection.ID)
 	if err != nil {
 		return fmt.Errorf("failed to get connection to SQLite index service: %v", err)
 	}
 
 	// Kiểm tra ràng buộc của từng index
 	for _, index := range uniqueIndexes {
-		// Tạo key cho index bằng cách kết hợp ID index và giá trị của trường `_key`
-		combinedIndexKey := fmt.Sprintf("%d_%v", index.ID, input[index.Fields])
+		// Loại index có nhiều hơn 2 field, contruct value từ các field
+		indexFields := strings.Split(index.Fields, ",")
+		value := ""
+		if len(indexFields) > 1 {
+			for _, field := range indexFields {
+				value += fmt.Sprintf("%v", input[string(field)])
+			}
+		} else {
+			value = fmt.Sprintf("%v", input[index.Fields])
+		}
 
-		// Kiểm tra xem key đã tồn tại trong index chưa
-		_, err := collection_index_service.Get([]byte(combinedIndexKey))
-		if err == nil {
-			return fmt.Errorf("unique constraint violation for index %s", index.Name)
+		// Truy vấn tất cả các bản ghi từ bảng index có tên động
+		var indexTableRecords []models.IndexTableStruct
+		if err := dbclient_collection.Table(index.Name).Where("value = ?", value).Find(&indexTableRecords).Error; err != nil {
+			return fmt.Errorf("failed to query records: %v", err)
+		}
+
+		// Nếu có bản ghi, và giá trị keys giống với key trong input, trả về lỗi
+		if len(indexTableRecords) > 0 {
+			indexTableRecord := indexTableRecords[0]
+			if indexTableRecord.Keys == input["_key"] {
+				return fmt.Errorf("unique constraint violation on index %s", index.Name)
+			}
 		}
 	}
+	return nil
 }

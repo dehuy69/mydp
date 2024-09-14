@@ -28,7 +28,7 @@ func (ctrl *Controller) LoginHandler(c *gin.Context) {
 	}
 
 	// Lấy thông tin người dùng
-	user, err := ctrl.SQliteService.GetUser(payload.Username)
+	user, err := ctrl.SQLiteCatalogService.GetUser(payload.Username)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
 		return

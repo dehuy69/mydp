@@ -5,21 +5,41 @@ import (
 	"fmt"
 
 	"github.com/dehuy69/mydp/main_server/models"
-	"github.com/dehuy69/mydp/main_server/service"
+	service "github.com/dehuy69/mydp/main_server/service"
 )
 
 // CollectionWrapper là struct bọc để thêm các phương thức vào Collection
 type CollectionWrapper struct {
-	Collection    *models.Collection     // Chứa đối tượng Collection từ models
-	BadgerService *service.BadgerService // Kết nối cơ sở dữ liệu
+	SQLiteCatalogService *service.SQLiteCatalogService // Kết nối cơ sở dữ liệu
+	SQLiteIndexService   *service.SQLiteIndexService   // Kết nối đến SQLite index service
+	Collection           *models.Collection            // Chứa đối tượng Collection từ models
+	BadgerService        *service.BadgerService        // Kết nối cơ sở dữ liệu
 }
 
 // NewCollectionWrapper khởi tạo một instance mới của CollectionWrapper
-func NewCollectionWrapper(collection *models.Collection, BadgerService *service.BadgerService) *CollectionWrapper {
+func NewCollectionWrapper(SQLiteCatalogService *service.SQLiteCatalogService, SQLiteIndexService *service.SQLiteIndexService, collection *models.Collection, BadgerService *service.BadgerService) *CollectionWrapper {
 	return &CollectionWrapper{
-		Collection:    collection,
-		BadgerService: BadgerService,
+		SQLiteCatalogService: SQLiteCatalogService,
+		SQLiteIndexService:   SQLiteIndexService,
+		Collection:           collection,
+		BadgerService:        BadgerService,
 	}
+}
+
+// Create Collection in catalog
+func (cw *CollectionWrapper) CreateCollectionInCatalog(collectionName string) error {
+	// Tạo một collection mới
+	collection := models.Collection{
+		Name: collectionName,
+	}
+
+	// Tạo collection trong cơ sở dữ liệu
+	if err := cw.SQLiteCatalogService.CreateCollection(&collection); err != nil {
+		return fmt.Errorf("failed to create collection in catalog: %v", err)
+	}
+
+	return nil
+
 }
 
 // Write dữ liệu vào collection với input là một map bất kỳ
@@ -78,4 +98,38 @@ func (cw *CollectionWrapper) Read(key string) (map[string]interface{}, error) {
 	}
 
 	return valueMap, nil
+}
+
+// Function kiểm tra dữ liệu ghi vào collection có thỏa các ràng buộc của index
+func (cw *CollectionWrapper) CheckIndexConstraints(input map[string]interface{}) error {
+	// Tìm tất cả các index của collection có is_unique = true
+	uniqueIndexes := make([]models.Index, 0)
+	for _, index := range cw.Collection.Indexes {
+		if index.IsUnique {
+			uniqueIndexes = append(uniqueIndexes, index)
+		}
+	}
+
+	// Nếu không có index nào có is_unique = true, không cần kiểm tra ràng buộc
+	if len(uniqueIndexes) == 0 {
+		return nil
+	}
+
+	// Lấy kết nối đến SQLite index service của collection
+	collection_index_service, err := cw.SQLiteIndexService.GetConnection(cw.Collection.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get connection to SQLite index service: %v", err)
+	}
+
+	// Kiểm tra ràng buộc của từng index
+	for _, index := range uniqueIndexes {
+		// Tạo key cho index bằng cách kết hợp ID index và giá trị của trường `_key`
+		combinedIndexKey := fmt.Sprintf("%d_%v", index.ID, input[index.Fields])
+
+		// Kiểm tra xem key đã tồn tại trong index chưa
+		_, err := collection_index_service.Get([]byte(combinedIndexKey))
+		if err == nil {
+			return fmt.Errorf("unique constraint violation for index %s", index.Name)
+		}
+	}
 }

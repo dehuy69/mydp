@@ -6,15 +6,15 @@ import (
 )
 
 type Controller struct {
-	config        *config.Config
-	SQliteService *service.SQLiteService
-	BadgerService *service.BadgerService
-	PhoneService  *service.ParquetService
-	QueueManager  *service.QueueManager
+	config               *config.Config
+	SQLiteCatalogService *service.SQLiteCatalogService
+	BadgerService        *service.BadgerService
+	PhoneService         *service.ParquetService
+	QueueManager         *service.QueueManager
 }
 
 func NewController(config *config.Config) (*Controller, error) {
-	sqliteService, err := service.NewSQLiteService(config)
+	sqliteCatalogService, err := service.NewSQLiteCatalogService(config)
 	if err != nil {
 		return nil, err
 	}
@@ -33,11 +33,11 @@ func NewController(config *config.Config) (*Controller, error) {
 	queueManager := service.NewQueueManager()
 
 	return &Controller{
-		config:        config,
-		SQliteService: sqliteService,
-		BadgerService: badgerService,
-		PhoneService:  parquetService,
-		QueueManager:  queueManager,
+		config:               config,
+		SQLiteCatalogService: sqliteCatalogService,
+		BadgerService:        badgerService,
+		PhoneService:         parquetService,
+		QueueManager:         queueManager,
 	}, nil
 }
 

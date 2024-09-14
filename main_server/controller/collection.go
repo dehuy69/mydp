@@ -25,7 +25,7 @@ func (ctrl *Controller) CreateCollectionHandler(c *gin.Context) {
 		WorkspaceID: req.WorkspaceID,
 	}
 
-	if err := ctrl.SQliteService.CreateCollection(&collection); err != nil {
+	if err := ctrl.SQLiteCatalogService.CreateCollection(&collection); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

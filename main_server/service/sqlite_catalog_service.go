@@ -11,11 +11,11 @@ import (
 	"gorm.io/gorm"
 )
 
-type SQLiteService struct {
+type SQLiteCatalogService struct {
 	db *gorm.DB
 }
 
-func NewSQLiteService(cfg *config.Config) (*SQLiteService, error) {
+func NewSQLiteCatalogService(cfg *config.Config) (*SQLiteCatalogService, error) {
 	// Path to SQLite database file
 	path := filepath.Join(cfg.DataFolderDefault, "catalog", "sqlite3.db")
 
@@ -35,7 +35,7 @@ func NewSQLiteService(cfg *config.Config) (*SQLiteService, error) {
 	}
 
 	// Khởi tạo SQLiteManager
-	manager := &SQLiteService{db: db}
+	manager := &SQLiteCatalogService{db: db}
 
 	// Tạo người dùng admin mặc định nếu chưa tồn tại
 	err = manager.createDefaultAdminUser()
@@ -59,7 +59,7 @@ func autoMigrate(db *gorm.DB) error {
 }
 
 // createDefaultAdminUser tạo người dùng admin mặc định nếu chưa tồn tại
-func (m *SQLiteService) createDefaultAdminUser() error {
+func (m *SQLiteCatalogService) createDefaultAdminUser() error {
 	var user models.User
 	result := m.db.First(&user, "username = ?", "admin")
 	if result.Error == gorm.ErrRecordNotFound {
@@ -75,7 +75,7 @@ func (m *SQLiteService) createDefaultAdminUser() error {
 }
 
 // Close đóng kết nối cơ sở dữ liệu
-func (m *SQLiteService) Close() error {
+func (m *SQLiteCatalogService) Close() error {
 	sqlDB, err := m.db.DB()
 	if err != nil {
 		return err
@@ -84,7 +84,7 @@ func (m *SQLiteService) Close() error {
 }
 
 // AddUser thêm người dùng mới với mật khẩu đã mã hóa
-func (m *SQLiteService) AddUser(username, password, role string) error {
+func (m *SQLiteCatalogService) AddUser(username, password, role string) error {
 	user := models.User{
 		Username: username,
 		Password: password, // Bạn nên mã hóa mật khẩu này
@@ -94,7 +94,7 @@ func (m *SQLiteService) AddUser(username, password, role string) error {
 }
 
 // GetUser lấy thông tin người dùng từ cơ sở dữ liệu
-func (m *SQLiteService) GetUser(username string) (*models.User, error) {
+func (m *SQLiteCatalogService) GetUser(username string) (*models.User, error) {
 	var user models.User
 	result := m.db.First(&user, "username = ?", username)
 	if result.Error != nil {
@@ -104,6 +104,24 @@ func (m *SQLiteService) GetUser(username string) (*models.User, error) {
 }
 
 // CreateCollection tạo một collection mới
-func (m *SQLiteService) CreateCollection(collection *models.Collection) error {
+func (m *SQLiteCatalogService) CreateCollection(collection *models.Collection) error {
 	return m.db.Create(collection).Error
+}
+
+func (m *SQLiteCatalogService) GetCollectionByName(name string) (*models.Collection, error) {
+	var collection models.Collection
+	result := m.db.First(&collection, "name = ?", name)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &collection, nil
+}
+
+func (m *SQLiteCatalogService) GetIndexesByServer(server string) ([]models.Index, error) {
+	var indexes []models.Index
+	result := m.db.Find(&indexes, "server = ?", server)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return indexes, nil
 }

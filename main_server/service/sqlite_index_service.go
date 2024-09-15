@@ -12,23 +12,23 @@ import (
 )
 
 type SQLiteIndexService struct {
-	DB            *gorm.DB
-	BadgerService *BadgerService
-	Connections   map[string]*gorm.DB
+	SqliteCatalogService *SQLiteCatalogService
+	BadgerService        *BadgerService
+	Connections          map[string]*gorm.DB
 }
 
-func NewSQLiteIndexService(db *gorm.DB, badgerService *BadgerService) *SQLiteIndexService {
+func NewSQLiteIndexService(sqliteCatalogService *SQLiteCatalogService, badgerService *BadgerService) *SQLiteIndexService {
 	return &SQLiteIndexService{
-		DB:            db,
-		BadgerService: badgerService,
-		Connections:   make(map[string]*gorm.DB),
+		SqliteCatalogService: sqliteCatalogService,
+		BadgerService:        badgerService,
+		Connections:          make(map[string]*gorm.DB),
 	}
 }
 
 func (s *SQLiteIndexService) EnsureIndexes() error {
 	// Lấy danh sách các index từ catalog
 	var indexes []models.Index
-	if err := s.DB.Where("server_id = ?", "localhost").Find(&indexes).Error; err != nil {
+	if err := s.SqliteCatalogService.db.Where("server_id = ?", "localhost").Find(&indexes).Error; err != nil {
 		return fmt.Errorf("failed to get indexes from catalog: %v", err)
 	}
 
@@ -95,7 +95,7 @@ func (s *SQLiteIndexService) CreateIndex(collectionID int, indexName string, fie
 	}
 
 	// Lưu index vào catalog
-	if err := s.DB.Create(&index).Error; err != nil {
+	if err := s.SqliteCatalogService.db.Create(&index).Error; err != nil {
 		return fmt.Errorf("failed to create index in catalog: %v", err)
 	}
 

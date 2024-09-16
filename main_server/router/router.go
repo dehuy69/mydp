@@ -19,8 +19,14 @@ func SetupRouter(ctrl *controller.Controller) *gin.Engine {
 	publicR := r.Group("/api")
 	{
 		publicR.POST("/login", ctrl.LoginHandler)
-		publicR.POST("/collection", ctrl.CreateCollectionHandler)
-		publicR.POST("/collection/:collection-id/write", ctrl.WriteCollectionHandler)
+		// /api/workspace/create
+		publicR.POST("/workspace/create", ctrl.CreateWorkspaceHandler)
+		// /api/workspace/<workspace-id>/collection/create
+		publicR.POST("/workspace/:workspace-id/collection/create", ctrl.CreateCollectionHandler)
+		///api/workspace/<workspace-id>/collection/<collection-id>/write
+		publicR.POST("/workspace/:workspace-id/collection/:collection-id/write", ctrl.WriteCollectionHandler)
+		// /api/workspace/<workspace-id>/collection/<collection-id>/index/create
+		publicR.POST("/workspace/:workspace-id/collection/:collection-id/index/create", ctrl.CreateIndexHandler)
 	}
 
 	return r

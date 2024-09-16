@@ -4,16 +4,23 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/dehuy69/mydp/main_server/domain"
 	"github.com/dehuy69/mydp/main_server/models"
 	"github.com/gin-gonic/gin"
 )
 
 type CreateCollectionRequest struct {
-	Name        string `json:"name" binding:"required"`
-	WorkspaceID int    `json:"workspace_id" binding:"required"`
+	Name string `json:"name" binding:"required"`
 }
 
 func (ctrl *Controller) CreateCollectionHandler(c *gin.Context) {
+	WorkspaceIDStr := c.Param("workspace-id")
+	WorkspaceID, err := strconv.Atoi(WorkspaceIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid workspace ID"})
+		return
+	}
+
 	var req CreateCollectionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err})
@@ -22,10 +29,13 @@ func (ctrl *Controller) CreateCollectionHandler(c *gin.Context) {
 
 	collection := models.Collection{
 		Name:        req.Name,
-		WorkspaceID: req.WorkspaceID,
+		WorkspaceID: WorkspaceID,
 	}
 
-	if err := ctrl.SQLiteCatalogService.CreateCollection(&collection); err != nil {
+	// collection wrapper
+	collectionWrapper := domain.NewCollectionWrapper(&collection, ctrl.SQLiteCatalogService, ctrl.SQLiteIndexService, ctrl.BadgerService)
+
+	if err := collectionWrapper.CreateCollection(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

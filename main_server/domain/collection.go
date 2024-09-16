@@ -18,7 +18,7 @@ type CollectionWrapper struct {
 }
 
 // NewCollectionWrapper khởi tạo một instance mới của CollectionWrapper
-func NewCollectionWrapper(SQLiteCatalogService *service.SQLiteCatalogService, SQLiteIndexService *service.SQLiteIndexService, collection *models.Collection, BadgerService *service.BadgerService) *CollectionWrapper {
+func NewCollectionWrapper(collection *models.Collection, SQLiteCatalogService *service.SQLiteCatalogService, SQLiteIndexService *service.SQLiteIndexService, BadgerService *service.BadgerService) *CollectionWrapper {
 	return &CollectionWrapper{
 		SQLiteCatalogService: SQLiteCatalogService,
 		SQLiteIndexService:   SQLiteIndexService,
@@ -28,15 +28,57 @@ func NewCollectionWrapper(SQLiteCatalogService *service.SQLiteCatalogService, SQ
 }
 
 // Create Collection in catalog
-func (cw *CollectionWrapper) CreateCollectionInCatalog(collectionName string) error {
-	// Tạo một collection mới
-	collection := models.Collection{
-		Name: collectionName,
+func (cw *CollectionWrapper) CreateCollection() error {
+	// Lấy server localhost
+	server, err := cw.SQLiteCatalogService.GetServerByHost("localhost")
+	if err != nil {
+		return fmt.Errorf("failed to get server: %v", err)
 	}
 
+	// // Lấy Workspace
+	// workspace, err := cw.SQLiteCatalogService.GetWorkspaceByID(cw.Collection.WorkspaceID)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to get workspace: %v", err)
+	// }
+
+	// // Tạo một collection mới
+	// collection := models.Collection{
+	// 	Name:        collectionName,
+	// 	WorkspaceID: workspace.ID,
+	// 	ShardKey:    "_key",
+	// }
+	cw.Collection.ShardKey = "_key"
+
 	// Tạo collection trong cơ sở dữ liệu
-	if err := cw.SQLiteCatalogService.CreateCollection(&collection); err != nil {
+	if err := cw.SQLiteCatalogService.CreateCollection(cw.Collection); err != nil {
 		return fmt.Errorf("failed to create collection in catalog: %v", err)
+	}
+
+	// Tạo Shard default cho collection
+	shard := models.Shard{
+		CollectionID: cw.Collection.ID,
+		ShardNumber:  0,
+		ShardKey:     "_key",
+		Status:       "active",
+		ServerID:     server.ID,
+	}
+	err = cw.SQLiteCatalogService.CreateShard(&shard)
+	if err != nil {
+		return fmt.Errorf("func %s, failed to create shard in catalog: %v", "CreateCollection", err)
+	}
+
+	// Tạo index default cho collection
+	index := models.Index{
+		CollectionID: cw.Collection.ID,
+		Name:         fmt.Sprintf("%s_default_idx", cw.Collection.Name),
+		Fields:       "_key",
+		IsUnique:     true,
+		Status:       "active",
+		ServerID:     server.ID,
+	}
+	err = cw.SQLiteCatalogService.CreateIndex(&index)
+	if err != nil {
+		return fmt.Errorf("func %s, failed to create index in catalog: %v", "CreateCollection", err)
 	}
 
 	return nil
@@ -54,11 +96,12 @@ func (cw *CollectionWrapper) Write(input map[string]interface{}) error {
 	// Tìm	tất cả các index của collection
 	for _, index := range cw.Collection.Indexes {
 		// Tạo một instance của IndexWrapper
-		indexWrapper := NewIndexWrapper(&index, cw.SQLiteCatalogService, cw.SQLiteIndexService)
+		indexWrapper := NewIndexWrapper(&index, cw.SQLiteCatalogService, cw.SQLiteIndexService, cw.BadgerService)
 		err := indexWrapper.Insert(input)
 		if err != nil {
 			return fmt.Errorf("failed to insert record into index: %v", err)
 		}
+
 	}
 
 	return nil
@@ -125,7 +168,7 @@ func (cw *CollectionWrapper) CheckIndexConstraints(input map[string]interface{})
 	}
 
 	// Lấy kết nối đến SQLite index service của collection
-	dbclient_collection, err := cw.SQLiteIndexService.GetConnection(cw.Collection.ID)
+	dbclient_collection, err := cw.SQLiteIndexService.GetConnection(cw.Collection.Name)
 	if err != nil {
 		return fmt.Errorf("failed to get connection to SQLite index service: %v", err)
 	}

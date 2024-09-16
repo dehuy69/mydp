@@ -34,7 +34,7 @@ func (s *SQLiteIndexService) EnsureIndexes() error {
 
 	for _, index := range indexes {
 		// retrieve collection
-		collection, err := s.getCollection(*index.CollectionID)
+		collection, err := s.getCollection(index.CollectionID)
 		if err != nil {
 			return fmt.Errorf("failed to get collection: %v", err)
 		}
@@ -42,7 +42,7 @@ func (s *SQLiteIndexService) EnsureIndexes() error {
 		// Đảm bảo file SQLite cho collection đã được tạo hoặc tồn tại
 		dbPath := filepath.Join("data", "index", fmt.Sprintf("%d.db", &collection.Name))
 		if err := s.ensureDBFile(dbPath); err != nil {
-			return fmt.Errorf("failed to ensure db file for collection %d: %v", *index.CollectionID, err)
+			return fmt.Errorf("failed to ensure db file for collection %d: %v", index.CollectionID, err)
 		}
 
 		// Khởi tạo kết nối cơ sở dữ liệu bằng GORM
@@ -112,15 +112,15 @@ func (s *SQLiteIndexService) ensureTable(db *gorm.DB, index models.Index) error 
 	return nil
 }
 
-// Thêm hàm tạo mới một bảng index trong một collection
-func (s *SQLiteIndexService) CreateIndex(collectionID int, index *models.Index) error {
+// TẠo index trong index service, hàm này phải được gọi sau khi index đã được tạo trong catalog
+func (s *SQLiteIndexService) CreateIndex(index *models.Index) error {
 	// Lưu index vào catalog
 	if err := s.SqliteCatalogService.db.Create(&index).Error; err != nil {
 		return fmt.Errorf("failed to create index in catalog: %v", err)
 	}
 
 	// retrieve collection
-	collection, err := s.getCollection(collectionID)
+	collection, err := s.getCollection(index.CollectionID)
 	if err != nil {
 		return fmt.Errorf("failed to get collection: %v", err)
 	}
@@ -128,7 +128,7 @@ func (s *SQLiteIndexService) CreateIndex(collectionID int, index *models.Index) 
 	// Đảm bảo file SQLite cho collection đã được tạo hoặc tồn tại
 	dbPath := filepath.Join("data", "index", fmt.Sprintf("%s.db", collection.Name))
 	if err := s.ensureDBFile(dbPath); err != nil {
-		return fmt.Errorf("failed to ensure db file for collection %d: %v", collectionID, err)
+		return fmt.Errorf("failed to ensure db file for collection %d: %v", index.CollectionID, err)
 	}
 
 	// Khởi tạo kết nối cơ sở dữ liệu bằng GORM
@@ -170,11 +170,10 @@ func (s *SQLiteIndexService) CreateIndex(collectionID int, index *models.Index) 
 }
 
 // Trả về kết nối đến SQLite database của một collection
-func (s *SQLiteIndexService) GetConnection(collectionID int) (*gorm.DB, error) {
-	dbPath := filepath.Join("data", "index", fmt.Sprintf("%d.db", collectionID))
-	db, ok := s.Connections[dbPath]
+func (s *SQLiteIndexService) GetConnection(collectionName string) (*gorm.DB, error) {
+	db, ok := s.Connections[collectionName]
 	if !ok {
-		return nil, fmt.Errorf("connection for collection %d not found", collectionID)
+		return nil, fmt.Errorf("connection for collection %s not found", collectionName)
 	}
 	return db, nil
 }
@@ -185,4 +184,18 @@ func (s *SQLiteIndexService) getCollection(collectionID int) (*models.Collection
 		return nil, fmt.Errorf("failed to get collection: %v", err)
 	}
 	return &collection, nil
+}
+
+// Tìm tất cả các keys trong table default
+func (s *SQLiteIndexService) FindKeys(collectionName string) ([]string, error) {
+	db, err := s.GetConnection(collectionName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connection: %v", err)
+	}
+
+	var keys []string
+	if err := db.Table(fmt.Sprintf("%s_default_idx", collectionName)).Pluck("keys", &keys).Error; err != nil {
+		return nil, fmt.Errorf("failed to find keys: %v", err)
+	}
+	return keys, nil
 }

@@ -129,3 +129,47 @@ func (m *SQLiteCatalogService) GetIndexesByServer(server string) ([]models.Index
 func (m *SQLiteCatalogService) CreateIndex(index *models.Index) error {
 	return m.db.Create(index).Error
 }
+
+// Tạo shard mới
+func (m *SQLiteCatalogService) CreateShard(shard *models.Shard) error {
+	return m.db.Create(shard).Error
+}
+
+// Lấy Server theo host
+func (m *SQLiteCatalogService) GetServerByHost(host string) (*models.Server, error) {
+	var server models.Server
+	result := m.db.First(&server, "host = ?", host)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &server, nil
+}
+
+// Lấy workspace theo tên
+func (m *SQLiteCatalogService) GetWorkspaceByName(name string) (*models.Workspace, error) {
+	var workspace models.Workspace
+	result := m.db.First(&workspace, "name = ?", name)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &workspace, nil
+}
+
+func (m *SQLiteCatalogService) GetWorkspaceByID(id int) (*models.Workspace, error) {
+	var workspace models.Workspace
+	result := m.db.First(&workspace, "id = ?", id)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &workspace, nil
+}
+
+// UpdateIndex cập nhật thông tin index
+func (m *SQLiteCatalogService) UpdateIndex(index *models.Index) error {
+	return m.db.Save(index).Error
+}
+
+// CreatWorkspace
+func (m *SQLiteCatalogService) CreateWorkspace(workspace *models.Workspace) error {
+	return m.db.Create(workspace).Error
+}

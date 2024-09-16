@@ -33,8 +33,14 @@ func (s *SQLiteIndexService) EnsureIndexes() error {
 	}
 
 	for _, index := range indexes {
+		// retrieve collection
+		collection, err := s.getCollection(*index.CollectionID)
+		if err != nil {
+			return fmt.Errorf("failed to get collection: %v", err)
+		}
+
 		// Đảm bảo file SQLite cho collection đã được tạo hoặc tồn tại
-		dbPath := filepath.Join("data", "index", fmt.Sprintf("%d.db", *index.CollectionID))
+		dbPath := filepath.Join("data", "index", fmt.Sprintf("%d.db", &collection.Name))
 		if err := s.ensureDBFile(dbPath); err != nil {
 			return fmt.Errorf("failed to ensure db file for collection %d: %v", *index.CollectionID, err)
 		}
@@ -51,7 +57,7 @@ func (s *SQLiteIndexService) EnsureIndexes() error {
 		}
 
 		// Lưu kết nối vào mảng Connections
-		s.Connections[dbPath] = db
+		s.Connections[collection.Name] = db
 	}
 
 	return nil
@@ -77,30 +83,50 @@ func (s *SQLiteIndexService) ensureDBFile(dbPath string) error {
 }
 
 func (s *SQLiteIndexService) ensureTable(db *gorm.DB, index models.Index) error {
+	// Tạo schema với datatype chỉ định
+	schema := models.IndexTableStruct{}
+	if index.DataType == models.DataTypeInt {
+		if value, ok := schema.Value.(int); ok {
+			schema.Value = value
+		} else {
+			return fmt.Errorf("failed to assert schema value to int")
+		}
+	} else if index.DataType == models.DataTypeFloat {
+		if value, ok := schema.Value.(float64); ok {
+			schema.Value = value
+		} else {
+			return fmt.Errorf("failed to assert schema value to float64")
+		}
+	} else {
+		if value, ok := schema.Value.(string); ok {
+			schema.Value = value
+		} else {
+			return fmt.Errorf("failed to assert schema value to string")
+		}
+	}
+
 	// Tạo table sử dụng model.IndexTableStruct với tên table là index.Name
-	if err := db.Table(index.Name).AutoMigrate(&models.IndexTableStruct{}); err != nil {
+	if err := db.Table(index.Name).AutoMigrate(schema); err != nil {
 		return fmt.Errorf("failed to auto migrate table: %v", err)
 	}
 	return nil
 }
 
 // Thêm hàm tạo mới một bảng index trong một collection
-func (s *SQLiteIndexService) CreateIndex(collectionID int, indexName string, fields string, isUnique bool) error {
-	// Tạo một đối tượng Index mới
-	index := models.Index{
-		CollectionID: &collectionID,
-		Name:         indexName,
-		Fields:       fields,
-		IsUnique:     isUnique,
-	}
-
+func (s *SQLiteIndexService) CreateIndex(collectionID int, index *models.Index) error {
 	// Lưu index vào catalog
 	if err := s.SqliteCatalogService.db.Create(&index).Error; err != nil {
 		return fmt.Errorf("failed to create index in catalog: %v", err)
 	}
 
+	// retrieve collection
+	collection, err := s.getCollection(collectionID)
+	if err != nil {
+		return fmt.Errorf("failed to get collection: %v", err)
+	}
+
 	// Đảm bảo file SQLite cho collection đã được tạo hoặc tồn tại
-	dbPath := filepath.Join("data", "index", fmt.Sprintf("%d.db", collectionID))
+	dbPath := filepath.Join("data", "index", fmt.Sprintf("%s.db", collection.Name))
 	if err := s.ensureDBFile(dbPath); err != nil {
 		return fmt.Errorf("failed to ensure db file for collection %d: %v", collectionID, err)
 	}
@@ -111,13 +137,34 @@ func (s *SQLiteIndexService) CreateIndex(collectionID int, indexName string, fie
 		log.Fatalf("failed to connect database: %v", err)
 	}
 
+	// Tạo schema với datatype chỉ định
+	schema := models.IndexTableStruct{}
+	if index.DataType == models.DataTypeInt {
+		if value, ok := schema.Value.(int); ok {
+			schema.Value = value
+		} else {
+			return fmt.Errorf("failed to assert schema value to int")
+		}
+	} else if index.DataType == models.DataTypeFloat {
+		if value, ok := schema.Value.(float64); ok {
+			schema.Value = value
+		} else {
+			return fmt.Errorf("failed to assert schema value to float64")
+		}
+	} else {
+		if value, ok := schema.Value.(string); ok {
+			schema.Value = value
+		} else {
+			return fmt.Errorf("failed to assert schema value to string")
+		}
+	}
 	// Tạo table mới, tên table là indexName
-	if err := db.Table(index.Name).AutoMigrate(&models.IndexTableStruct{}); err != nil {
+	if err := db.Table(index.Name).AutoMigrate(schema); err != nil {
 		return fmt.Errorf("failed to auto migrate table: %v", err)
 	}
 
 	// Lưu kết nối vào mảng Connections
-	s.Connections[dbPath] = db
+	s.Connections[collection.Name] = db
 
 	return nil
 }
@@ -130,4 +177,12 @@ func (s *SQLiteIndexService) GetConnection(collectionID int) (*gorm.DB, error) {
 		return nil, fmt.Errorf("connection for collection %d not found", collectionID)
 	}
 	return db, nil
+}
+
+func (s *SQLiteIndexService) getCollection(collectionID int) (*models.Collection, error) {
+	var collection models.Collection
+	if err := s.SqliteCatalogService.db.First(&collection, collectionID).Error; err != nil {
+		return nil, fmt.Errorf("failed to get collection: %v", err)
+	}
+	return &collection, nil
 }

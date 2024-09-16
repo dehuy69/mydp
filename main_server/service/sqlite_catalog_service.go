@@ -125,3 +125,7 @@ func (m *SQLiteCatalogService) GetIndexesByServer(server string) ([]models.Index
 	}
 	return indexes, nil
 }
+
+func (m *SQLiteCatalogService) CreateIndex(index *models.Index) error {
+	return m.db.Create(index).Error
+}

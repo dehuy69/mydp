@@ -51,6 +51,12 @@ func (ctrl *Controller) WriteCollectionHandler(c *gin.Context) {
 		return
 	}
 
+	// Ensure _key in data
+	if _, ok := req.Data["_key"]; !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Data must contain a '_key' field"})
+		return
+	}
+
 	// Thêm collection ID vào dữ liệu
 	req.Data["_collection_id"] = collectionID
 

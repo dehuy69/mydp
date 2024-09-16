@@ -9,7 +9,7 @@ type Controller struct {
 	config               *config.Config
 	SQLiteCatalogService *service.SQLiteCatalogService
 	BadgerService        *service.BadgerService
-	PhoneService         *service.ParquetService
+	ParquetService       *service.ParquetService
 	QueueManager         *service.QueueManager
 	SQLiteIndexService   *service.SQLiteIndexService
 }
@@ -39,7 +39,7 @@ func NewController(config *config.Config) (*Controller, error) {
 		config:               config,
 		SQLiteCatalogService: sqliteCatalogService,
 		BadgerService:        badgerService,
-		PhoneService:         parquetService,
+		ParquetService:       parquetService,
 		QueueManager:         queueManager,
 		SQLiteIndexService:   SQLiteIndexService,
 	}, nil

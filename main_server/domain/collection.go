@@ -45,6 +45,26 @@ func (cw *CollectionWrapper) CreateCollectionInCatalog(collectionName string) er
 
 // Write dữ liệu vào collection với input là một map bất kỳ
 func (cw *CollectionWrapper) Write(input map[string]interface{}) error {
+	error := cw.writeBadger(input)
+	if error != nil {
+		return error
+	}
+
+	// write index
+	// Tìm	tất cả các index của collection
+	for _, index := range cw.Collection.Indexes {
+		// Tạo một instance của IndexWrapper
+		indexWrapper := NewIndexWrapper(&index, cw.SQLiteCatalogService, cw.SQLiteIndexService)
+		err := indexWrapper.Insert(input)
+		if err != nil {
+			return fmt.Errorf("failed to insert record into index: %v", err)
+		}
+	}
+
+	return nil
+}
+
+func (cw *CollectionWrapper) writeBadger(input map[string]interface{}) error {
 	// Lấy giá trị của trường `_key` từ input map
 	keyField, ok := input["_key"]
 	if !ok {
@@ -65,18 +85,6 @@ func (cw *CollectionWrapper) Write(input map[string]interface{}) error {
 	if err != nil {
 		return fmt.Errorf("failed to write data to Badger: %v", err)
 	}
-
-	// Nếu có index, thêm dữ liệu vào index
-	// if len(cw.Collection.Indexes) > 0 {
-	// 	// Tạo key cho index bằng cách kết hợp ID index và giá trị của trường `_key`
-	// 	combinedIndexKey := fmt.Sprintf("%d_%v", cw.Collection.Index.ID, keyField)
-
-	// 	// Ghi dữ liệu vào Badger với key và value
-	// 	err = cw.BadgerService.Set([]byte(combinedIndexKey), valueBytes)
-	// 	if err != nil {
-	// 		return fmt.Errorf("failed to write data to Badger: %v", err)
-	// 	}
-	// }
 
 	return nil
 }

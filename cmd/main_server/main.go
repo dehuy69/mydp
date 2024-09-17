@@ -43,7 +43,7 @@ func main() {
 	}()
 
 	// Initialize and run write-collection consumer in a goroutine
-	consumerService, err := consumer.NewWriteCollectionConsumer(ctrl.SQLiteCatalogService, ctrl.BadgerService, ctrl.QueueManager, ctrl.SQLiteIndexService)
+	consumerService, err := consumer.NewWriteCollectionConsumer(ctrl.SQLiteCatalogService, ctrl.BadgerService, ctrl.QueueManager)
 	if err != nil {
 		log.Fatalf("Failed to initialize consumer service: %v", err)
 	}

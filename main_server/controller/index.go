@@ -44,7 +44,7 @@ func (ctrl *Controller) CreateIndexHandler(c *gin.Context) {
 	index.IsUnique = req.IsUnique
 
 	// Tạo index wrapper
-	indexWrapper := domain.NewIndexWrapper(&index, ctrl.SQLiteCatalogService, ctrl.SQLiteIndexService, ctrl.BadgerService)
+	indexWrapper := domain.NewIndexWrapper(&index, ctrl.SQLiteCatalogService, ctrl.BadgerService)
 
 	// Use indexWrapper to avoid "declared and not used" error
 	if err := indexWrapper.CreateIndex(); err != nil {

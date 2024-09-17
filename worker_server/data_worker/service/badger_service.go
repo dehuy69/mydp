@@ -5,7 +5,7 @@ import (
 
 	"github.com/dehuy69/mydp/config"
 	"github.com/dehuy69/mydp/utils"
-	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v4"
 )
 
 type BadgerService struct {

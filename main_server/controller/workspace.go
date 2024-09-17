@@ -30,7 +30,7 @@ func (ctrl *Controller) CreateWorkspaceHandler(c *gin.Context) {
 	}
 
 	// workspace wrapper
-	workspaceWrapper := domain.NewWorkspaceWrapper(&workspace, ctrl.SQLiteCatalogService, ctrl.SQLiteIndexService, ctrl.BadgerService)
+	workspaceWrapper := domain.NewWorkspaceWrapper(&workspace, ctrl.SQLiteCatalogService, ctrl.BadgerService)
 
 	if err := workspaceWrapper.CreateWorkspace(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

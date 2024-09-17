@@ -11,7 +11,6 @@ type WriteCollectionConsumer struct {
 	SQLiteCatalogService *service.SQLiteCatalogService
 	BadgerService        *service.BadgerService
 	QueueManager         *service.QueueManager
-	SQLiteIndexService   *service.SQLiteIndexService
 	queueName            string
 	stopChan             chan struct{}
 }
@@ -19,7 +18,7 @@ type WriteCollectionConsumer struct {
 func NewWriteCollectionConsumer(SQLiteCatalogService *service.SQLiteCatalogService,
 	BadgerService *service.BadgerService,
 	QueueManager *service.QueueManager,
-	SQLiteIndexService *service.SQLiteIndexService) (*WriteCollectionConsumer, error) {
+) (*WriteCollectionConsumer, error) {
 
 	queueManager := service.NewQueueManager()
 	return &WriteCollectionConsumer{
@@ -28,7 +27,6 @@ func NewWriteCollectionConsumer(SQLiteCatalogService *service.SQLiteCatalogServi
 		SQLiteCatalogService: SQLiteCatalogService,
 		BadgerService:        BadgerService,
 		QueueManager:         queueManager,
-		SQLiteIndexService:   SQLiteIndexService,
 	}, nil
 }
 

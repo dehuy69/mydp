@@ -5,11 +5,11 @@ import (
 
 	"github.com/dehuy69/mydp/config"
 	"github.com/dehuy69/mydp/utils"
-	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v4"
 )
 
 type BadgerService struct {
-	db *badger.DB
+	Db *badger.DB
 }
 
 // NewBadgerService tạo một instance mới của BadgerService và mở kết nối tới cơ sở dữ liệu Badger
@@ -27,17 +27,17 @@ func NewBadgerService(cfg *config.Config) (*BadgerService, error) {
 		return nil, err
 	}
 
-	return &BadgerService{db: db}, nil
+	return &BadgerService{Db: db}, nil
 }
 
 // Close đóng kết nối tới cơ sở dữ liệu Badger
 func (bs *BadgerService) Close() error {
-	return bs.db.Close()
+	return bs.Db.Close()
 }
 
 // Set ghi một cặp khóa-giá trị vào cơ sở dữ liệu Badger
 func (bs *BadgerService) Set(key, value []byte) error {
-	err := bs.db.Update(func(txn *badger.Txn) error {
+	err := bs.Db.Update(func(txn *badger.Txn) error {
 		return txn.Set(key, value)
 	})
 	return err
@@ -46,7 +46,7 @@ func (bs *BadgerService) Set(key, value []byte) error {
 // Get đọc giá trị từ cơ sở dữ liệu Badger dựa trên khóa
 func (bs *BadgerService) Get(key []byte) ([]byte, error) {
 	var value []byte
-	err := bs.db.View(func(txn *badger.Txn) error {
+	err := bs.Db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get(key)
 		if err != nil {
 			return err
@@ -59,7 +59,7 @@ func (bs *BadgerService) Get(key []byte) ([]byte, error) {
 
 // Delete xóa một cặp khóa-giá trị từ cơ sở dữ liệu Badger
 func (bs *BadgerService) Delete(key []byte) error {
-	err := bs.db.Update(func(txn *badger.Txn) error {
+	err := bs.Db.Update(func(txn *badger.Txn) error {
 		return txn.Delete(key)
 	})
 	return err

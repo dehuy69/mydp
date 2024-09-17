@@ -4,26 +4,25 @@ import (
 	"crypto/md5"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/dehuy69/mydp/main_server/models"
 	service "github.com/dehuy69/mydp/main_server/service"
+	"github.com/dgraph-io/badger/v4"
 )
 
 type IndexWrapper struct {
 	SQLiteCatalogService *service.SQLiteCatalogService // Kết nối cơ sở dữ liệu
 	Index                *models.Index                 // Chứa đối tượng Collection từ models
-	SQLiteIndexService   *service.SQLiteIndexService   // Kết nối cơ sở dữ liệu
 	BadgerService        *service.BadgerService
 }
 
 // NewIndexWrapper khởi tạo một instance mới của IndexWrapper
 // Một index sẽ có tên bảng là động nhưng cấu trúc của bảng sẽ giống nhau
 // value: int/string, keys: string
-func NewIndexWrapper(index *models.Index, SQLiteCatalogService *service.SQLiteCatalogService, SQLiteIndexService *service.SQLiteIndexService, BadgerService *service.BadgerService) *IndexWrapper {
+func NewIndexWrapper(index *models.Index, SQLiteCatalogService *service.SQLiteCatalogService, BadgerService *service.BadgerService) *IndexWrapper {
 	if index.ID != 0 {
 		// Preload các liên kết thủ công
 		preload := SQLiteCatalogService.Db.Preload("Collection").First(index)
@@ -39,7 +38,6 @@ func NewIndexWrapper(index *models.Index, SQLiteCatalogService *service.SQLiteCa
 	return &IndexWrapper{
 		SQLiteCatalogService: SQLiteCatalogService,
 		Index:                index,
-		SQLiteIndexService:   SQLiteIndexService,
 		BadgerService:        BadgerService,
 	}
 }
@@ -62,14 +60,8 @@ func (iw *IndexWrapper) CreateIndex() error {
 		return fmt.Errorf("failed to get index: %v", err)
 	}
 
-	// Gọi index service, tạo index
-	err = iw.SQLiteIndexService.CreateIndex(iw.Index)
-	if err != nil {
-		return fmt.Errorf("failed to create index: %v", err)
-	}
-
 	// Scan dữ liệu hiện có trong collection, insert vào index
-	err = iw.ScanDataAndInsert()
+	err = iw.scanDataAndInsert()
 	if err != nil {
 		return fmt.Errorf("failed to scan data and insert: %v", err)
 	}
@@ -94,33 +86,25 @@ func (iw *IndexWrapper) CreateIndex() error {
 	return nil
 }
 
-func (iw *IndexWrapper) ScanDataAndInsert() error {
-	// query bảng <collection_name>
-	keys, err := iw.SQLiteIndexService.FindKeys(iw.Index.Collection.Name)
-	if err != nil {
-		return fmt.Errorf("failed to find keys: %v", err)
-	}
-
-	// lặp qua các key và chèn data vào index
-	for _, key := range keys {
-		// Lấy data từ badger
-		input, err := iw.BadgerService.Get([]byte(key))
-		if err != nil {
-			return fmt.Errorf("failed to get data from badger: %v", err)
+func (iw *IndexWrapper) scanDataAndInsert() error {
+	// Iter qua tất cả các key trong badger prefix của <collection-id>||*
+	iw.BadgerService.Db.View(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+		prefix := []byte(fmt.Sprintf("%d||", iw.Index.Collection.ID))
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			k := item.Key()
+			err := item.Value(func(v []byte) error {
+				fmt.Printf("key=%s, value=%s\n", k, v)
+				return nil
+			})
+			if err != nil {
+				return err
+			}
 		}
-
-		// Unmarshal input từ []byte sang map[string]interface{}
-		var inputData map[string]interface{}
-		if err := json.Unmarshal(input, &inputData); err != nil {
-			return fmt.Errorf("failed to unmarshal input: %v", err)
-		}
-		// Insert data vào index
-		err = iw.Insert(inputData)
-		if err != nil {
-			return fmt.Errorf("failed to insert data: %v", err)
-		}
-
-	}
+		return nil
+	})
 	return nil
 }
 
@@ -172,22 +156,14 @@ func (iw *IndexWrapper) addCacheToIndex() error {
 }
 
 // Query 1 record với giá trị value
-func (iw *IndexWrapper) Query(value interface{}) ([]models.IndexTableStruct, error) {
-	dbclient, err := iw.SQLiteIndexService.GetConnection(iw.Index.Collection.Name)
-	if err != nil {
-		return nil, err
-	}
-	// Truy vấn tất cả các bản ghi từ bảng có tên động
-	var indexTableRecords []models.IndexTableStruct
-	if err := dbclient.Table(iw.Index.Name).Where("value = ?", value).Find(&indexTableRecords).Error; err != nil {
-		log.Fatalf("failed to query records: %v", err)
-	}
-
-	return indexTableRecords, nil
+func (iw *IndexWrapper) Query(value interface{}) (map[string]interface{}, error) {
+	return nil, nil
 
 }
 
 // Insert 1 input vào bảng index
+// <index-id>||<value> chứa các keys
+// <index-id>||_values chứa các values
 func (iw *IndexWrapper) Insert(input map[string]interface{}) error {
 	// input phải có trường _key
 	if _, ok := input["_key"]; !ok {
@@ -204,12 +180,6 @@ func (iw *IndexWrapper) Insert(input map[string]interface{}) error {
 		return iw.insertWhenIndexIsBuilding(input)
 	}
 
-	// Lấy kết nối tới bảng index
-	dbclient, err := iw.SQLiteIndexService.GetConnection(iw.Index.Collection.Name)
-	if err != nil {
-		return err
-	}
-
 	// Lấy giá trị của value
 	// Nếu index là loại hỗn hợp (type là hash)), thì giá trị value sẽ là một tổ hợp md5 %s%s của các trường khác nhau
 	// Nếu index là loại đơn, thì giá trị value sẽ là giá trị của trường đó
@@ -218,15 +188,20 @@ func (iw *IndexWrapper) Insert(input map[string]interface{}) error {
 	// Lấy giá trị của key. Là giá trị của trường _key trong input
 	key := input["_key"].(string)
 
-	// Thêm key vào danh sách keys
-	indexOfValue := models.IndexTableStruct{}
-	dbclient.Table(iw.Index.Name).Where("value = ?", value).First(indexOfValue)
-	// Thêm key vào keys
-	keys := iw.appendKey(indexOfValue.Keys, key)
+	// Lấy index data từ badger
+	indexData, err := iw.BadgerService.Get([]byte(fmt.Sprintf("%d||%v", iw.Index.ID, value)))
 
-	// Update record
-	if err := dbclient.Table(iw.Index.Name).Where("value = ?", value).Update("keys", keys).Error; err != nil {
-		log.Fatalf("failed to update record: %v", err)
+	// Ép thành mảng, thêm key vào mảng, ghi lại vào indexData
+	keys := iw.appendKey(string(indexData), key)
+	err = iw.BadgerService.Set([]byte(fmt.Sprintf("%d||%v", iw.Index.ID, value)), []byte(keys))
+	if err != nil {
+		return fmt.Errorf("failed to write to badger: %v", err)
+	}
+
+	// Ghi vào values
+	err = iw.BadgerService.Set([]byte(fmt.Sprintf("%d||%s", iw.Index.ID, "_values")), []byte(fmt.Sprintf("%v", value)))
+	if err != nil {
+		return fmt.Errorf("failed to write to badger: %v", err)
 	}
 
 	return nil
@@ -280,39 +255,32 @@ func (iw *IndexWrapper) getValueFromInput(input map[string]interface{}) interfac
 
 // Hàm kiểm tra input có thỏa mãn ràng buộc của index không
 func (iw *IndexWrapper) CheckIndexConstraints(input map[string]interface{}) error {
+	if iw.Index.IsUnique {
+		return iw.checkUniqueConstraints(input)
+	}
+	return nil
+
+}
+
+// check contraints unique của index
+func (iw *IndexWrapper) checkUniqueConstraints(input map[string]interface{}) error {
 	// Loại index có nhiều hơn 2 field, contruct value từ các field
 	value := iw.getValueFromInput(input)
 
-	dbclient_collection, err := iw.SQLiteIndexService.GetConnection(iw.Index.Collection.Name)
+	// Lấy index data trong badger theo key <index-id>||<value>
+	indexData, err := iw.BadgerService.Get([]byte(fmt.Sprintf("%d||%v", iw.Index.ID, value)))
 	if err != nil {
-		return fmt.Errorf("failed to get connection to SQLite index service: %v", err)
-	}
-
-	// Truy vấn tất cả các bản ghi từ bảng index có tên động
-	var indexTableRecords interface{}
-	switch iw.Index.DataType {
-	case models.DataTypeInt:
-		indexTableRecords = models.IndexTableStructInt{}
-	case models.DataTypeFloat:
-		indexTableRecords = models.IndexTableStructFloat{}
-	default:
-		indexTableRecords = models.IndexTableStructString{}
-	}
-
-	if err := dbclient_collection.Table(iw.Index.Name).Where("value = ?", value).First(&indexTableRecords).Error; err != nil {
-		// Nếu không tìm thấy bản ghi, không cần kiểm tra ràng buộc
-		if err.Error() == "record not found" {
+		// Nếu không tìm thấy index data, không cần kiểm tra ràng buộc
+		if err == badger.ErrKeyNotFound {
 			return nil
 		}
-		return fmt.Errorf("failed to query records: %v", err)
+		return fmt.Errorf("failed to get index data: %v", err)
 	}
 
-	// Nếu có bản ghi, và giá trị keys khac với key trong input, trả về lỗi
-	// value, keys
-	//     1, 1
-	if indexTableRecords != input["_key"] {
-		return fmt.Errorf("unique constraint failed for index %s", iw.Index.Name)
+	// kiểm tra xem trong indexData có chứa key của input không
+	// Nếu không có, trả về lỗi
+	if !strings.Contains(string(indexData), input["_key"].(string)) {
+		return fmt.Errorf("input violates unique constraint")
 	}
-
 	return nil
 }

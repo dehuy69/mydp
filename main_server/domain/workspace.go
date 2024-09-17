@@ -7,15 +7,13 @@ import (
 
 type WorkspaceWrapper struct {
 	SQLiteCatalogService *service.SQLiteCatalogService
-	SQLiteIndexService   *service.SQLiteIndexService
 	Workspace            *models.Workspace
 	BadgerService        *service.BadgerService
 }
 
-func NewWorkspaceWrapper(workspace *models.Workspace, SQLiteCatalogService *service.SQLiteCatalogService, SQLiteIndexService *service.SQLiteIndexService, BadgerService *service.BadgerService) *WorkspaceWrapper {
+func NewWorkspaceWrapper(workspace *models.Workspace, SQLiteCatalogService *service.SQLiteCatalogService, BadgerService *service.BadgerService) *WorkspaceWrapper {
 	return &WorkspaceWrapper{
 		SQLiteCatalogService: SQLiteCatalogService,
-		SQLiteIndexService:   SQLiteIndexService,
 		Workspace:            workspace,
 		BadgerService:        BadgerService,
 	}

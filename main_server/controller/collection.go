@@ -33,7 +33,7 @@ func (ctrl *Controller) CreateCollectionHandler(c *gin.Context) {
 	}
 
 	// collection wrapper
-	collectionWrapper := domain.NewCollectionWrapper(&collection, ctrl.SQLiteCatalogService, ctrl.SQLiteIndexService, ctrl.BadgerService)
+	collectionWrapper := domain.NewCollectionWrapper(&collection, ctrl.SQLiteCatalogService, ctrl.BadgerService)
 
 	if err := collectionWrapper.CreateCollection(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -71,7 +71,7 @@ func (ctrl *Controller) WriteCollectionHandler(c *gin.Context) {
 	}
 
 	// collection wrapper
-	collectionWrapper := domain.NewCollectionWrapper(collection, ctrl.SQLiteCatalogService, ctrl.SQLiteIndexService, ctrl.BadgerService)
+	collectionWrapper := domain.NewCollectionWrapper(collection, ctrl.SQLiteCatalogService, ctrl.BadgerService)
 
 	// Kiểm tra constrain
 	err = collectionWrapper.CheckIndexConstraints(req)
@@ -118,7 +118,7 @@ func (ctrl *Controller) ForceWriteCollectionHandler(c *gin.Context) {
 	}
 
 	// collection wrapper
-	collectionWrapper := domain.NewCollectionWrapper(collection, ctrl.SQLiteCatalogService, ctrl.SQLiteIndexService, ctrl.BadgerService)
+	collectionWrapper := domain.NewCollectionWrapper(collection, ctrl.SQLiteCatalogService, ctrl.BadgerService)
 
 	collectionWrapper.Write(req)
 

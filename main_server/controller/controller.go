@@ -11,7 +11,6 @@ type Controller struct {
 	BadgerService        *service.BadgerService
 	ParquetService       *service.ParquetService
 	QueueManager         *service.QueueManager
-	SQLiteIndexService   *service.SQLiteIndexService
 }
 
 func NewController(config *config.Config) (*Controller, error) {
@@ -30,8 +29,6 @@ func NewController(config *config.Config) (*Controller, error) {
 		return nil, err
 	}
 
-	SQLiteIndexService := service.NewSQLiteIndexService(sqliteCatalogService, badgerService)
-
 	// khởi taon internal message queue
 	queueManager := service.NewQueueManager()
 
@@ -41,7 +38,6 @@ func NewController(config *config.Config) (*Controller, error) {
 		BadgerService:        badgerService,
 		ParquetService:       parquetService,
 		QueueManager:         queueManager,
-		SQLiteIndexService:   SQLiteIndexService,
 	}, nil
 }
 

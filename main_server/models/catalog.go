@@ -52,14 +52,15 @@ type Collection struct {
 // Shard struct đại diện cho thông tin về một shard trong Collection
 type Shard struct {
 	gorm.Model
-	ID           int    `json:"id" gorm:"primarykey"`
-	CollectionID int    `json:"collection_id" gorm:"not null;index"` // ID của collection chứa shard này
-	ShardNumber  int    `json:"shard_number" gorm:"not null"`        // Số thứ tự của shard trong collection
-	ShardKey     string `json:"shard_key" gorm:"not null"`           // Giá trị của shard key
-	ServerID     int    `json:"server_id" gorm:"not null;index"`     // ID của server chứa shard này
-	Server       Server `gorm:"foreignKey:ServerID"`                 // Tham chiếu đến server
-	Status       string `json:"status" gorm:"not null"`              // Trạng thái của shard (active, inactive, etc.)
-	Size         int64  `json:"size"`                                // Kích thước của shard
+	ID           int        `json:"id" gorm:"primarykey"`
+	CollectionID int        `json:"collection_id" gorm:"not null;index"` // ID của collection chứa shard này
+	ShardNumber  int        `json:"shard_number" gorm:"not null"`        // Số thứ tự của shard trong collection
+	ShardKey     string     `json:"shard_key" gorm:"not null"`           // Giá trị của shard key
+	ServerID     int        `json:"server_id" gorm:"not null;index"`     // ID của server chứa shard này
+	Server       Server     `gorm:"foreignKey:ServerID"`                 // Tham chiếu đến server
+	Collection   Collection `gorm:"foreignKey:CollectionID"`
+	Status       string     `json:"status" gorm:"not null"` // Trạng thái của shard (active, inactive, etc.)
+	Size         int64      `json:"size"`                   // Kích thước của shard
 }
 
 // Table struct đại diện cho một bảng OLAP trong workspace

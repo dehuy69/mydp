@@ -3,7 +3,6 @@ package domain
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/dehuy69/mydp/main_server/models"
 	service "github.com/dehuy69/mydp/main_server/service"
@@ -19,12 +18,27 @@ type CollectionWrapper struct {
 
 // NewCollectionWrapper khởi tạo một instance mới của CollectionWrapper
 func NewCollectionWrapper(collection *models.Collection, SQLiteCatalogService *service.SQLiteCatalogService, SQLiteIndexService *service.SQLiteIndexService, BadgerService *service.BadgerService) *CollectionWrapper {
-	return &CollectionWrapper{
+	// Kiểm tra tồn tại trước khi preload
+	fmt.Println("Collection ID:", collection.ID)
+	if collection.ID != 0 {
+		// Preload các liên kết thủ công
+		preload := SQLiteCatalogService.Db.Preload("Workspace").Preload("Indexes").Preload("Shards").First(collection)
+		err := preload.Error
+		if err != nil {
+			fmt.Println("Error preloading collection:", err)
+			return nil
+		}
+	} else {
+		fmt.Println("Collection ID is 0, không cần preload")
+	}
+
+	wrapper := CollectionWrapper{
 		SQLiteCatalogService: SQLiteCatalogService,
 		SQLiteIndexService:   SQLiteIndexService,
 		Collection:           collection,
 		BadgerService:        BadgerService,
 	}
+	return &wrapper
 }
 
 // Create Collection in catalog
@@ -49,7 +63,7 @@ func (cw *CollectionWrapper) CreateCollection() error {
 	// }
 	cw.Collection.ShardKey = "_key"
 
-	// Tạo collection trong cơ sở dữ liệu
+	// Tạo collection trong catalog
 	if err := cw.SQLiteCatalogService.CreateCollection(cw.Collection); err != nil {
 		return fmt.Errorf("failed to create collection in catalog: %v", err)
 	}
@@ -75,8 +89,17 @@ func (cw *CollectionWrapper) CreateCollection() error {
 		IsUnique:     true,
 		Status:       "active",
 		ServerID:     server.ID,
+		IndexType:    models.IndexTypeBTree,
+		DataType:     models.DataTypeString,
 	}
-	err = cw.SQLiteCatalogService.CreateIndex(&index)
+	// err = cw.SQLiteCatalogService.CreateIndex(&index)
+	// if err != nil {
+	// 	return fmt.Errorf("func %s, failed to create index in catalog: %v", "CreateCollection", err)
+	// }
+	// Tạo wrapper cho index
+	indexWrapper := NewIndexWrapper(&index, cw.SQLiteCatalogService, cw.SQLiteIndexService, cw.BadgerService)
+	// Tạo index
+	err = indexWrapper.CreateIndex()
 	if err != nil {
 		return fmt.Errorf("func %s, failed to create index in catalog: %v", "CreateCollection", err)
 	}
@@ -114,9 +137,6 @@ func (cw *CollectionWrapper) writeBadger(input map[string]interface{}) error {
 		return fmt.Errorf("input map must contain a '_key' field")
 	}
 
-	// Tạo key bằng cách kết hợp ID collection và giá trị của trường `_key`
-	combinedKey := fmt.Sprintf("%d_%v", cw.Collection.ID, keyField)
-
 	// Chuyển đổi input map thành chuỗi JSON
 	valueBytes, err := json.Marshal(input)
 	if err != nil {
@@ -124,7 +144,11 @@ func (cw *CollectionWrapper) writeBadger(input map[string]interface{}) error {
 	}
 
 	// Ghi dữ liệu vào Badger với key và value
-	err = cw.BadgerService.Set([]byte(combinedKey), valueBytes)
+	keyFieldStr, ok := keyField.(string)
+	if !ok {
+		return fmt.Errorf("keyField must be a string")
+	}
+	err = cw.BadgerService.Set([]byte(cw.CreateBadgerKey(keyFieldStr)), valueBytes)
 	if err != nil {
 		return fmt.Errorf("failed to write data to Badger: %v", err)
 	}
@@ -167,38 +191,20 @@ func (cw *CollectionWrapper) CheckIndexConstraints(input map[string]interface{})
 		return nil
 	}
 
-	// Lấy kết nối đến SQLite index service của collection
-	dbclient_collection, err := cw.SQLiteIndexService.GetConnection(cw.Collection.Name)
-	if err != nil {
-		return fmt.Errorf("failed to get connection to SQLite index service: %v", err)
-	}
-
 	// Kiểm tra ràng buộc của từng index
 	for _, index := range uniqueIndexes {
-		// Loại index có nhiều hơn 2 field, contruct value từ các field
-		indexFields := strings.Split(index.Fields, ",")
-		value := ""
-		if len(indexFields) > 1 {
-			for _, field := range indexFields {
-				value += fmt.Sprintf("%v", input[string(field)])
-			}
-		} else {
-			value = fmt.Sprintf("%v", input[index.Fields])
+		// Tạo wrapper cho index
+		indexWrapper := NewIndexWrapper(&index, cw.SQLiteCatalogService, cw.SQLiteIndexService, cw.BadgerService)
+		err := indexWrapper.CheckIndexConstraints(input)
+		if err != nil {
+			return err
 		}
 
-		// Truy vấn tất cả các bản ghi từ bảng index có tên động
-		var indexTableRecords []models.IndexTableStruct
-		if err := dbclient_collection.Table(index.Name).Where("value = ?", value).Find(&indexTableRecords).Error; err != nil {
-			return fmt.Errorf("failed to query records: %v", err)
-		}
-
-		// Nếu có bản ghi, và giá trị keys giống với key trong input, trả về lỗi
-		if len(indexTableRecords) > 0 {
-			indexTableRecord := indexTableRecords[0]
-			if indexTableRecord.Keys == input["_key"] {
-				return fmt.Errorf("unique constraint violation on index %s", index.Name)
-			}
-		}
 	}
 	return nil
+}
+
+// Tạo key badger
+func (cw *CollectionWrapper) CreateBadgerKey(inputKey string) string {
+	return fmt.Sprintf("%d_%v", cw.Collection.ID, inputKey)
 }

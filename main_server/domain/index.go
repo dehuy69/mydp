@@ -24,6 +24,18 @@ type IndexWrapper struct {
 // Một index sẽ có tên bảng là động nhưng cấu trúc của bảng sẽ giống nhau
 // value: int/string, keys: string
 func NewIndexWrapper(index *models.Index, SQLiteCatalogService *service.SQLiteCatalogService, SQLiteIndexService *service.SQLiteIndexService, BadgerService *service.BadgerService) *IndexWrapper {
+	if index.ID != 0 {
+		// Preload các liên kết thủ công
+		preload := SQLiteCatalogService.Db.Preload("Collection").First(index)
+		err := preload.Error
+		if err != nil {
+			fmt.Println("Error preloading collection:", err)
+			return nil
+		}
+	} else {
+		fmt.Println("Index ID is 0, không cần preload")
+	}
+
 	return &IndexWrapper{
 		SQLiteCatalogService: SQLiteCatalogService,
 		Index:                index,
@@ -37,10 +49,17 @@ func (iw *IndexWrapper) CreateIndex() error {
 	// Set status của index là building
 	iw.Index.Status = models.IndexStatusBuilding
 
-	// Retrieve lại IndexWrapper.Index
+	// Tạo index trong catalog
 	err := iw.SQLiteCatalogService.CreateIndex(iw.Index)
 	if err != nil {
 		return fmt.Errorf("failed to create index: %v", err)
+	}
+
+	// Retrive index
+	// Truy vấn với Preload để tải dữ liệu của Collection
+	err = iw.SQLiteCatalogService.GetModelWithAllAssociations(iw.Index, iw.Index.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get index: %v", err)
 	}
 
 	// Gọi index service, tạo index
@@ -50,7 +69,7 @@ func (iw *IndexWrapper) CreateIndex() error {
 	}
 
 	// Scan dữ liệu hiện có trong collection, insert vào index
-	err = iw.scanDataAndInsert()
+	err = iw.ScanDataAndInsert()
 	if err != nil {
 		return fmt.Errorf("failed to scan data and insert: %v", err)
 	}
@@ -58,14 +77,24 @@ func (iw *IndexWrapper) CreateIndex() error {
 	// Set status của index là ready
 	iw.Index.Status = models.IndexStatusActive
 	err = iw.SQLiteCatalogService.UpdateIndex(iw.Index)
+	if err != nil {
+		return fmt.Errorf("failed to update index: %v", err)
+	}
 
 	// Thêm data cache vào index
 	err = iw.addCacheToIndex()
+	if err != nil {
+		// Nếu là lỗi không có file cache, không cần xử lý
+		if strings.Contains(err.Error(), "no such file or directory") {
+			return nil
+		}
+		return fmt.Errorf("failed to add cache to index: %v", err)
+	}
 
 	return nil
 }
 
-func (iw *IndexWrapper) scanDataAndInsert() error {
+func (iw *IndexWrapper) ScanDataAndInsert() error {
 	// query bảng <collection_name>
 	keys, err := iw.SQLiteIndexService.FindKeys(iw.Index.Collection.Name)
 	if err != nil {
@@ -134,6 +163,11 @@ func (iw *IndexWrapper) addCacheToIndex() error {
 			return fmt.Errorf("failed to insert record: %v", err)
 		}
 	}
+	// Xóa file cache
+	// cachePath := fmt.Sprintf("data/cache/collection_%s/index_%s/data.json", iw.Index.Collection.Name, iw.Index.Name)
+	// if err := os.Remove(cachePath); err != nil {
+	// 	return fmt.Errorf("failed to remove cache file: %v", err)
+	// }
 	return nil
 }
 
@@ -160,6 +194,11 @@ func (iw *IndexWrapper) Insert(input map[string]interface{}) error {
 		return fmt.Errorf("input must contain a '_key' field")
 	}
 
+	// Kiểm tra constraints của index
+	if err := iw.CheckIndexConstraints(input); err != nil {
+		return err
+	}
+
 	// Nếu trạng thái status của index là building, thì cache lại trong data/cache/collection_<collection_name>/index_<index_name>/data.json
 	if iw.Index.Status == models.IndexStatusBuilding {
 		return iw.insertWhenIndexIsBuilding(input)
@@ -174,20 +213,7 @@ func (iw *IndexWrapper) Insert(input map[string]interface{}) error {
 	// Lấy giá trị của value
 	// Nếu index là loại hỗn hợp (type là hash)), thì giá trị value sẽ là một tổ hợp md5 %s%s của các trường khác nhau
 	// Nếu index là loại đơn, thì giá trị value sẽ là giá trị của trường đó
-	var value interface{}
-	if iw.Index.IndexType == models.IndexTypeHash {
-		fieldsList := strings.Split(iw.Index.Fields, ",")
-		preHashedValue := ""
-		for _, field := range fieldsList {
-			preHashedValue += input[field].(string)
-		}
-		md5Value := md5.Sum([]byte(preHashedValue))
-		value = fmt.Sprintf("%x", md5Value)
-	} else {
-		value = input[iw.Index.Fields]
-		// Ép kiểu value về  datatype của index
-		value = iw.assertValue(value)
-	}
+	value := iw.getValueFromInput(input)
 
 	// Lấy giá trị của key. Là giá trị của trường _key trong input
 	key := input["_key"].(string)
@@ -226,18 +252,6 @@ func (iw *IndexWrapper) insertWhenIndexIsBuilding(input map[string]interface{}) 
 	return nil
 }
 
-// Hàm ép kiểu value về datatype của index
-func (iw *IndexWrapper) assertValue(value interface{}) interface{} {
-	switch iw.Index.DataType {
-	case models.DataTypeInt:
-		return value.(int)
-	case models.DataTypeFloat:
-		return value.(float64)
-	default:
-		return value.(string)
-	}
-}
-
 // Hàm chèn thêm một key vào Keys đã có
 func (iw *IndexWrapper) appendKey(keys string, key string) string {
 	if keys == "" {
@@ -248,4 +262,57 @@ func (iw *IndexWrapper) appendKey(keys string, key string) string {
 		return keys
 	}
 	return fmt.Sprintf("%s,%s", keys, key)
+}
+
+// Hàm lấy value từ input
+func (iw *IndexWrapper) getValueFromInput(input map[string]interface{}) interface{} {
+	if iw.Index.IndexType == models.IndexTypeHash {
+		fieldsList := strings.Split(iw.Index.Fields, ",")
+		preHashedValue := ""
+		for _, field := range fieldsList {
+			preHashedValue += input[field].(string)
+		}
+		md5Value := md5.Sum([]byte(preHashedValue))
+		return fmt.Sprintf("%x", md5Value)
+	}
+	return input[iw.Index.Fields]
+}
+
+// Hàm kiểm tra input có thỏa mãn ràng buộc của index không
+func (iw *IndexWrapper) CheckIndexConstraints(input map[string]interface{}) error {
+	// Loại index có nhiều hơn 2 field, contruct value từ các field
+	value := iw.getValueFromInput(input)
+
+	dbclient_collection, err := iw.SQLiteIndexService.GetConnection(iw.Index.Collection.Name)
+	if err != nil {
+		return fmt.Errorf("failed to get connection to SQLite index service: %v", err)
+	}
+
+	// Truy vấn tất cả các bản ghi từ bảng index có tên động
+	var indexTableRecords interface{}
+	switch iw.Index.DataType {
+	case models.DataTypeInt:
+		indexTableRecords = models.IndexTableStructInt{}
+	case models.DataTypeFloat:
+		indexTableRecords = models.IndexTableStructFloat{}
+	default:
+		indexTableRecords = models.IndexTableStructString{}
+	}
+
+	if err := dbclient_collection.Table(iw.Index.Name).Where("value = ?", value).First(&indexTableRecords).Error; err != nil {
+		// Nếu không tìm thấy bản ghi, không cần kiểm tra ràng buộc
+		if err.Error() == "record not found" {
+			return nil
+		}
+		return fmt.Errorf("failed to query records: %v", err)
+	}
+
+	// Nếu có bản ghi, và giá trị keys khac với key trong input, trả về lỗi
+	// value, keys
+	//     1, 1
+	if indexTableRecords != input["_key"] {
+		return fmt.Errorf("unique constraint failed for index %s", iw.Index.Name)
+	}
+
+	return nil
 }

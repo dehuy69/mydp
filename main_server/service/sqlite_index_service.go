@@ -18,17 +18,23 @@ type SQLiteIndexService struct {
 }
 
 func NewSQLiteIndexService(sqliteCatalogService *SQLiteCatalogService, badgerService *BadgerService) *SQLiteIndexService {
-	return &SQLiteIndexService{
+
+	sqliteIndexService := SQLiteIndexService{
 		SqliteCatalogService: sqliteCatalogService,
 		BadgerService:        badgerService,
 		Connections:          make(map[string]*gorm.DB),
 	}
+	err := sqliteIndexService.EnsureIndexes()
+	if err != nil {
+		log.Fatalf("failed to ensure db file: %v", err)
+	}
+	return &sqliteIndexService
 }
 
 func (s *SQLiteIndexService) EnsureIndexes() error {
-	// Lấy danh sách các index từ catalog
+	// Lấy danh sách các index từ catalog thuộc main server
 	var indexes []models.Index
-	if err := s.SqliteCatalogService.db.Where("server_id = ?", "localhost").Find(&indexes).Error; err != nil {
+	if err := s.SqliteCatalogService.Db.Where("server_id = ?", 1).Find(&indexes).Error; err != nil {
 		return fmt.Errorf("failed to get indexes from catalog: %v", err)
 	}
 
@@ -83,42 +89,16 @@ func (s *SQLiteIndexService) ensureDBFile(dbPath string) error {
 }
 
 func (s *SQLiteIndexService) ensureTable(db *gorm.DB, index models.Index) error {
-	// Tạo schema với datatype chỉ định
-	schema := models.IndexTableStruct{}
-	if index.DataType == models.DataTypeInt {
-		if value, ok := schema.Value.(int); ok {
-			schema.Value = value
-		} else {
-			return fmt.Errorf("failed to assert schema value to int")
-		}
-	} else if index.DataType == models.DataTypeFloat {
-		if value, ok := schema.Value.(float64); ok {
-			schema.Value = value
-		} else {
-			return fmt.Errorf("failed to assert schema value to float64")
-		}
-	} else {
-		if value, ok := schema.Value.(string); ok {
-			schema.Value = value
-		} else {
-			return fmt.Errorf("failed to assert schema value to string")
-		}
-	}
-
-	// Tạo table sử dụng model.IndexTableStruct với tên table là index.Name
-	if err := db.Table(index.Name).AutoMigrate(schema); err != nil {
-		return fmt.Errorf("failed to auto migrate table: %v", err)
+	// Tạo table chưa index data
+	err := createIndexTable(db, index.Name, index.DataType)
+	if err != nil {
+		return fmt.Errorf("failed to create index table: %v", err)
 	}
 	return nil
 }
 
 // TẠo index trong index service, hàm này phải được gọi sau khi index đã được tạo trong catalog
 func (s *SQLiteIndexService) CreateIndex(index *models.Index) error {
-	// Lưu index vào catalog
-	if err := s.SqliteCatalogService.db.Create(&index).Error; err != nil {
-		return fmt.Errorf("failed to create index in catalog: %v", err)
-	}
-
 	// retrieve collection
 	collection, err := s.getCollection(index.CollectionID)
 	if err != nil {
@@ -138,29 +118,9 @@ func (s *SQLiteIndexService) CreateIndex(index *models.Index) error {
 	}
 
 	// Tạo schema với datatype chỉ định
-	schema := models.IndexTableStruct{}
-	if index.DataType == models.DataTypeInt {
-		if value, ok := schema.Value.(int); ok {
-			schema.Value = value
-		} else {
-			return fmt.Errorf("failed to assert schema value to int")
-		}
-	} else if index.DataType == models.DataTypeFloat {
-		if value, ok := schema.Value.(float64); ok {
-			schema.Value = value
-		} else {
-			return fmt.Errorf("failed to assert schema value to float64")
-		}
-	} else {
-		if value, ok := schema.Value.(string); ok {
-			schema.Value = value
-		} else {
-			return fmt.Errorf("failed to assert schema value to string")
-		}
-	}
 	// Tạo table mới, tên table là indexName
-	if err := db.Table(index.Name).AutoMigrate(schema); err != nil {
-		return fmt.Errorf("failed to auto migrate table: %v", err)
+	if err := createIndexTable(db, index.Name, index.DataType); err != nil {
+		return fmt.Errorf("failed to create index table: %v", err)
 	}
 
 	// Lưu kết nối vào mảng Connections
@@ -180,7 +140,7 @@ func (s *SQLiteIndexService) GetConnection(collectionName string) (*gorm.DB, err
 
 func (s *SQLiteIndexService) getCollection(collectionID int) (*models.Collection, error) {
 	var collection models.Collection
-	if err := s.SqliteCatalogService.db.First(&collection, collectionID).Error; err != nil {
+	if err := s.SqliteCatalogService.Db.First(&collection, collectionID).Error; err != nil {
 		return nil, fmt.Errorf("failed to get collection: %v", err)
 	}
 	return &collection, nil
@@ -198,4 +158,44 @@ func (s *SQLiteIndexService) FindKeys(collectionName string) ([]string, error) {
 		return nil, fmt.Errorf("failed to find keys: %v", err)
 	}
 	return keys, nil
+}
+
+// Hàm tạo bảng Index với tên và kiểu dữ liệu tùy biến
+func createIndexTable(db *gorm.DB, tableName string, valueType string) error {
+	// Chuyển đổi kiểu dữ liệu đầu vào thành kiểu dữ liệu SQLite
+	var sqliteType string
+	switch valueType {
+	case models.DataTypeString:
+		sqliteType = "TEXT"
+	case models.DataTypeInt:
+		sqliteType = "INTEGER"
+	case models.DataTypeFloat:
+		sqliteType = "REAL"
+	default:
+		return fmt.Errorf("kiểu dữ liệu không hợp lệ: %s, chỉ chấp nhận string, int, hoặc float", valueType)
+	}
+
+	// Câu lệnh SQL để tạo bảng động
+	createTableSQL := fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			value %s,
+			keys TEXT,
+			created_at DATETIME,
+			updated_at DATETIME,
+			deleted_at DATETIME
+		);
+	`, tableName, sqliteType)
+
+	// Thực thi câu lệnh SQL để tạo bảng
+	if err := db.Exec(createTableSQL).Error; err != nil {
+		return fmt.Errorf("không thể tạo bảng: %v", err)
+	}
+
+	log.Printf("Bảng '%s' đã được tạo thành công với kiểu dữ liệu '%s' cho trường 'value'.\n", tableName, valueType)
+	return nil
+}
+
+func (s *SQLiteIndexService) GetConnectionList() map[string]*gorm.DB {
+	return s.Connections
 }

@@ -28,7 +28,9 @@ func SetupRouter(ctrl *controller.Controller) *gin.Engine {
 		publicR.POST("/workspace/:workspace-id/collection/:collection-id/force-write", ctrl.ForceWriteCollectionHandler)
 		// /api/workspace/<workspace-id>/collection/<collection-id>/index/create
 		publicR.POST("/workspace/:workspace-id/collection/:collection-id/index/create", ctrl.CreateIndexHandler)
-		publicR.GET("/_internal/debug/print-connection-list", ctrl.DebugFunction)
+
+		publicR.GET("/_internal/debug/getall-badger", ctrl.GetAllBadger)
+		publicR.GET("/_internal/debug/getall-bbolt", ctrl.GetAllBbolt)
 	}
 
 	return r

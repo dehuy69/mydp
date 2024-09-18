@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"path"
 
 	"github.com/dehuy69/mydp/config"
@@ -63,4 +64,34 @@ func (bs *BadgerService) Delete(key []byte) error {
 		return txn.Delete(key)
 	})
 	return err
+}
+
+func (bs *BadgerService) GetAllBadger() ([]map[string]interface{}, error) {
+	var data []map[string]interface{}
+
+	err := bs.Db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = true
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Rewind(); it.Valid(); it.Next() {
+			item := it.Item()
+			err := item.Value(func(val []byte) error {
+				var record map[string]interface{}
+				err := json.Unmarshal(val, &record)
+				if err != nil {
+					return err
+				}
+				data = append(data, record)
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	return data, err
 }

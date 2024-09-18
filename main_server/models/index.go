@@ -28,3 +28,5 @@ type IndexTableStructFloat struct {
 	Value float64 `json:"value" gorm:"index:idx_value,unique"`
 	Keys  string  `json:"keys"`
 }
+
+var IndexBboltValue []string

@@ -13,10 +13,12 @@ type CollectionWrapper struct {
 	SQLiteCatalogService *service.SQLiteCatalogService // Kết nối cơ sở dữ liệu
 	Collection           *models.Collection            // Chứa đối tượng Collection từ models
 	BadgerService        *service.BadgerService        // Kết nối cơ sở dữ liệu
+	BboltService         *service.BboltService         // Kết nối cơ sở dữ liệu
 }
 
 // NewCollectionWrapper khởi tạo một instance mới của CollectionWrapper
-func NewCollectionWrapper(collection *models.Collection, SQLiteCatalogService *service.SQLiteCatalogService, BadgerService *service.BadgerService) *CollectionWrapper {
+func NewCollectionWrapper(collection *models.Collection, SQLiteCatalogService *service.SQLiteCatalogService,
+	BadgerService *service.BadgerService, BboltService *service.BboltService) *CollectionWrapper {
 	// Kiểm tra tồn tại trước khi preload
 	fmt.Println("Collection ID:", collection.ID)
 	if collection.ID != 0 {
@@ -35,6 +37,7 @@ func NewCollectionWrapper(collection *models.Collection, SQLiteCatalogService *s
 		SQLiteCatalogService: SQLiteCatalogService,
 		Collection:           collection,
 		BadgerService:        BadgerService,
+		BboltService:         BboltService,
 	}
 	return &wrapper
 }
@@ -73,21 +76,30 @@ func (cw *CollectionWrapper) CreateCollection() error {
 
 // Write dữ liệu vào collection với input là một map bất kỳ
 func (cw *CollectionWrapper) Write(input map[string]interface{}) error {
-	error := cw.writeData(input)
-	if error != nil {
-		return error
+	// Gọi GetByKey Kiểm tra _key trong input có tồn tại chưa, nếu có rồi thì gọi qua update để cập nhật dữ liệu
+	_, err := cw.BadgerService.Get([]byte(cw.CreateBadgerKey(input["_key"].(string))))
+	if err == nil {
+		// Nếu không có lỗi, tức là đã tồn tại dữ liệu, gọi qua update
+		return fmt.Errorf("record already exists")
 	}
 
 	// write index
 	// Tìm	tất cả các index của collection
 	for _, index := range cw.Collection.Indexes {
 		// Tạo một instance của IndexWrapper
-		indexWrapper := NewIndexWrapper(&index, cw.SQLiteCatalogService, cw.BadgerService)
+		indexWrapper := NewIndexWrapper(&index, cw.SQLiteCatalogService, cw.BadgerService, cw.BboltService)
 		err := indexWrapper.Insert(input)
 		if err != nil {
+			fmt.Println("DEBUG (cw *CollectionWrapper) Write ", err)
 			return fmt.Errorf("failed to insert record into index: %v", err)
 		}
 
+	}
+
+	// Ghi dữ liệu vào badger
+	error := cw.writeData(input)
+	if error != nil {
+		return error
 	}
 
 	return nil
@@ -157,7 +169,7 @@ func (cw *CollectionWrapper) CheckIndexConstraints(input map[string]interface{})
 	// Kiểm tra ràng buộc của từng index
 	for _, index := range uniqueIndexes {
 		// Tạo wrapper cho index
-		indexWrapper := NewIndexWrapper(&index, cw.SQLiteCatalogService, cw.BadgerService)
+		indexWrapper := NewIndexWrapper(&index, cw.SQLiteCatalogService, cw.BadgerService, cw.BboltService)
 		err := indexWrapper.CheckIndexConstraints(input)
 		if err != nil {
 			return err

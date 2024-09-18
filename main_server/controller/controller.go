@@ -11,6 +11,7 @@ type Controller struct {
 	BadgerService        *service.BadgerService
 	ParquetService       *service.ParquetService
 	QueueManager         *service.QueueManager
+	BboltService         *service.BboltService
 }
 
 func NewController(config *config.Config) (*Controller, error) {
@@ -29,6 +30,12 @@ func NewController(config *config.Config) (*Controller, error) {
 		return nil, err
 	}
 
+	// khởi tạo internal bbolt service
+	bboltService, err := service.NewBboltService(config)
+	if err != nil {
+		return nil, err
+	}
+
 	// khởi taon internal message queue
 	queueManager := service.NewQueueManager()
 
@@ -38,6 +45,7 @@ func NewController(config *config.Config) (*Controller, error) {
 		BadgerService:        badgerService,
 		ParquetService:       parquetService,
 		QueueManager:         queueManager,
+		BboltService:         bboltService,
 	}, nil
 }
 

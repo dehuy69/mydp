@@ -33,7 +33,7 @@ func (ctrl *Controller) CreateCollectionHandler(c *gin.Context) {
 	}
 
 	// collection wrapper
-	collectionWrapper := domain.NewCollectionWrapper(&collection, ctrl.SQLiteCatalogService, ctrl.BadgerService)
+	collectionWrapper := domain.NewCollectionWrapper(&collection, ctrl.SQLiteCatalogService, ctrl.BadgerService, ctrl.BboltService)
 
 	if err := collectionWrapper.CreateCollection(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -71,7 +71,7 @@ func (ctrl *Controller) WriteCollectionHandler(c *gin.Context) {
 	}
 
 	// collection wrapper
-	collectionWrapper := domain.NewCollectionWrapper(collection, ctrl.SQLiteCatalogService, ctrl.BadgerService)
+	collectionWrapper := domain.NewCollectionWrapper(collection, ctrl.SQLiteCatalogService, ctrl.BadgerService, ctrl.BboltService)
 
 	// Kiểm tra constrain
 	err = collectionWrapper.CheckIndexConstraints(req)
@@ -89,7 +89,7 @@ func (ctrl *Controller) WriteCollectionHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "success"})
 }
 
-// ForceWriteCollectionHandler ghi dữ liệu vào collection mà không cần kiểm tra constrain
+// ForceWriteCollectionHandler ghi dữ liệu vào collection mà không thông qua WAL
 func (ctrl *Controller) ForceWriteCollectionHandler(c *gin.Context) {
 	collectionIDStr := c.Param("collection-id")
 	collectionID, err := strconv.Atoi(collectionIDStr)
@@ -118,9 +118,13 @@ func (ctrl *Controller) ForceWriteCollectionHandler(c *gin.Context) {
 	}
 
 	// collection wrapper
-	collectionWrapper := domain.NewCollectionWrapper(collection, ctrl.SQLiteCatalogService, ctrl.BadgerService)
+	collectionWrapper := domain.NewCollectionWrapper(collection, ctrl.SQLiteCatalogService, ctrl.BadgerService, ctrl.BboltService)
 
-	collectionWrapper.Write(req)
+	err = collectionWrapper.Write(req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "success"})
 }

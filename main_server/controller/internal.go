@@ -6,7 +6,22 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (ctrl *Controller) DebugFunction(c *gin.Context) {
-	// Get connection list of IndexService
-	c.JSON(http.StatusOK, gin.H{"message": "Hello World"})
+func (ctrl *Controller) GetAllBadger(c *gin.Context) {
+	data, err := ctrl.BadgerService.GetAllBadger()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, data)
+
+}
+
+func (ctrl *Controller) GetAllBbolt(c *gin.Context) {
+	data, err := ctrl.BboltService.GetAllBbolt()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, data)
+
 }

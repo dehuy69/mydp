@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/dehuy69/mydp/main_server/models"
 	service "github.com/dehuy69/mydp/main_server/service"
 	"github.com/dgraph-io/badger/v4"
@@ -17,12 +18,20 @@ type IndexWrapper struct {
 	SQLiteCatalogService *service.SQLiteCatalogService // Kết nối cơ sở dữ liệu
 	Index                *models.Index                 // Chứa đối tượng Collection từ models
 	BadgerService        *service.BadgerService
+	BboltService         *service.BboltService
 }
+
+// type node struct {
+// 	isUniqueType bool
+// 	key          string
+// 	values       []string
+// 	uniqueValues mapset.Set[string]
+// }
 
 // NewIndexWrapper khởi tạo một instance mới của IndexWrapper
 // Một index sẽ có tên bảng là động nhưng cấu trúc của bảng sẽ giống nhau
 // value: int/string, keys: string
-func NewIndexWrapper(index *models.Index, SQLiteCatalogService *service.SQLiteCatalogService, BadgerService *service.BadgerService) *IndexWrapper {
+func NewIndexWrapper(index *models.Index, SQLiteCatalogService *service.SQLiteCatalogService, BadgerService *service.BadgerService, bboltService *service.BboltService) *IndexWrapper {
 	if index.ID != 0 {
 		// Preload các liên kết thủ công
 		preload := SQLiteCatalogService.Db.Preload("Collection").First(index)
@@ -39,6 +48,7 @@ func NewIndexWrapper(index *models.Index, SQLiteCatalogService *service.SQLiteCa
 		SQLiteCatalogService: SQLiteCatalogService,
 		Index:                index,
 		BadgerService:        BadgerService,
+		BboltService:         bboltService,
 	}
 }
 
@@ -58,6 +68,12 @@ func (iw *IndexWrapper) CreateIndex() error {
 	err = iw.SQLiteCatalogService.GetModelWithAllAssociations(iw.Index, iw.Index.ID)
 	if err != nil {
 		return fmt.Errorf("failed to get index: %v", err)
+	}
+
+	// Tạo bucket trong bbolt
+	err = iw.BboltService.CreateBucketIfNotExists([]byte(fmt.Sprintf("%d", iw.Index.ID)))
+	if err != nil {
+		return fmt.Errorf("failed to create bucket: %v", err)
 	}
 
 	// Scan dữ liệu hiện có trong collection, insert vào index
@@ -87,24 +103,52 @@ func (iw *IndexWrapper) CreateIndex() error {
 }
 
 func (iw *IndexWrapper) scanDataAndInsert() error {
-	// Iter qua tất cả các key trong badger prefix của <collection-id>||*
-	iw.BadgerService.Db.View(func(txn *badger.Txn) error {
+	// Thực hiện một View transaction để đọc dữ liệu từ Badger
+	err := iw.BadgerService.Db.View(func(txn *badger.Txn) error {
+		// Tạo một iterator với các tùy chọn mặc định
 		it := txn.NewIterator(badger.DefaultIteratorOptions)
-		defer it.Close()
+		defer it.Close() // Đảm bảo đóng iterator sau khi sử dụng xong
+
+		// Xác định prefix để duyệt qua các key thuộc về một collection cụ thể
 		prefix := []byte(fmt.Sprintf("%d||", iw.Index.Collection.ID))
+
+		// Duyệt qua các key bắt đầu với prefix
 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 			item := it.Item()
-			k := item.Key()
-			err := item.Value(func(v []byte) error {
-				fmt.Printf("key=%s, value=%s\n", k, v)
+			// Lấy giá trị của item và chèn vào index
+			err := item.Value(func(value []byte) error {
+				// Gọi hàm Insert để chèn dữ liệu vào index
+				var record map[string]interface{}
+				err := json.Unmarshal(value, &record)
+				if err != nil {
+					return err
+				}
+				// Kiểm tra ràng buộc của index
+				err = iw.CheckIndexConstraints(record)
+				if err != nil {
+					return fmt.Errorf("scanDataAndInsert() failed to check index constraints: %v", err)
+				}
+				// Insert record vào index
+				err = iw.insertWithoutCheckingConstraint(record)
+				if err != nil {
+					return fmt.Errorf("failed to insert record: %v", err)
+				}
 				return nil
 			})
+
+			// Xử lý lỗi nếu có
 			if err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+
+	// Trả về lỗi nếu có trong quá trình xử lý
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -161,25 +205,37 @@ func (iw *IndexWrapper) Query(value interface{}) (map[string]interface{}, error)
 
 }
 
-// Insert 1 input vào bảng index
+// Insert 1 input vào index
+// Bucket    || Key
 // <index-id>||<value> chứa các keys
-// <index-id>||_values chứa các values
+
 func (iw *IndexWrapper) Insert(input map[string]interface{}) error {
 	// input phải có trường _key
 	if _, ok := input["_key"]; !ok {
 		return fmt.Errorf("input must contain a '_key' field")
 	}
 
+	// Kiểm tra input có field nằm trong index không, nếu không có, thì không cần xử lý
+	if _, ok := input[iw.Index.Fields]; !ok {
+		return nil
+	}
+
 	// Kiểm tra constraints của index
 	if err := iw.CheckIndexConstraints(input); err != nil {
+		fmt.Println("DEBUG: CheckIndexConstraints failed")
 		return err
 	}
 
 	// Nếu trạng thái status của index là building, thì cache lại trong data/cache/collection_<collection_name>/index_<index_name>/data.json
 	if iw.Index.Status == models.IndexStatusBuilding {
-		return iw.insertWhenIndexIsBuilding(input)
+		fmt.Println("DEBUG: Index is building")
+		return iw.insertToCache(input)
 	}
 
+	return iw.insertWithoutCheckingConstraint(input)
+}
+
+func (iw *IndexWrapper) insertWithoutCheckingConstraint(input map[string]interface{}) error {
 	// Lấy giá trị của value
 	// Nếu index là loại hỗn hợp (type là hash)), thì giá trị value sẽ là một tổ hợp md5 %s%s của các trường khác nhau
 	// Nếu index là loại đơn, thì giá trị value sẽ là giá trị của trường đó
@@ -188,26 +244,43 @@ func (iw *IndexWrapper) Insert(input map[string]interface{}) error {
 	// Lấy giá trị của key. Là giá trị của trường _key trong input
 	key := input["_key"].(string)
 
-	// Lấy index data từ badger
-	indexData, err := iw.BadgerService.Get([]byte(fmt.Sprintf("%d||%v", iw.Index.ID, value)))
-
-	// Ép thành mảng, thêm key vào mảng, ghi lại vào indexData
-	keys := iw.appendKey(string(indexData), key)
-	err = iw.BadgerService.Set([]byte(fmt.Sprintf("%d||%v", iw.Index.ID, value)), []byte(keys))
+	// Lấy index data từ bbolt
+	indexData, err := iw.BboltService.GetAndParseAsArrayString([]byte(fmt.Sprintf("%d", iw.Index.ID)), []byte(fmt.Sprintf("%v", value)))
 	if err != nil {
-		return fmt.Errorf("failed to write to badger: %v", err)
+		// Nếu không tìm thấy index data, tạo mới
+		if err.Error() == fmt.Sprintf("key %s not found in bucket %d", value, iw.Index.ID) {
+			indexData = []string{}
+		} else {
+			return fmt.Errorf("failed to get index data: %v", err)
+		}
 	}
 
-	// Ghi vào values
-	err = iw.BadgerService.Set([]byte(fmt.Sprintf("%d||%s", iw.Index.ID, "_values")), []byte(fmt.Sprintf("%v", value)))
+	// Ép thành mảng hoặc set, thêm key vào mảng/set, ghi lại vào indexData
+	// indexData -> [key1, key2, key3]
+	// Nếu index là unique, ép thành set
+	if iw.Index.IsUnique {
+		indexDataSet := mapset.NewSet[string](
+			indexData...,
+		)
+		indexDataSet.Add(key)
+		indexData = indexDataSet.ToSlice()
+	} else {
+		indexData = append(indexData, key)
+	}
+
+	idxbucket := []byte(fmt.Sprintf("%d", iw.Index.ID))
+	idxkey := []byte(fmt.Sprintf("%v", value))
+
+	err = iw.BboltService.SetArrayString(idxbucket, idxkey, indexData)
 	if err != nil {
-		return fmt.Errorf("failed to write to badger: %v", err)
+		return fmt.Errorf("failed to write to bbolt: %v", err)
 	}
 
 	return nil
+
 }
 
-func (iw *IndexWrapper) insertWhenIndexIsBuilding(input map[string]interface{}) error {
+func (iw *IndexWrapper) insertToCache(input map[string]interface{}) error {
 	// Lấy đường dẫn tới file cache, tạo thư mục nếu chưa tồn tại
 	cachePath := fmt.Sprintf("data/cache/collection_%s/index_%s/data.json", iw.Index.Collection.Name, iw.Index.Name)
 	if err := os.MkdirAll(filepath.Dir(cachePath), os.ModePerm); err != nil {
@@ -228,16 +301,15 @@ func (iw *IndexWrapper) insertWhenIndexIsBuilding(input map[string]interface{}) 
 }
 
 // Hàm chèn thêm một key vào Keys đã có
-func (iw *IndexWrapper) appendKey(keys string, key string) string {
-	if keys == "" {
-		return key
-	}
-	// Kiểm tra xem key đã tồn tại trong keys chưa
-	if strings.Contains(keys, key) {
-		return keys
-	}
-	return fmt.Sprintf("%s,%s", keys, key)
-}
+// func (iw *IndexWrapper) appendKey(keys []byte, key string) ([]string, error) {
+// 	// Parse indexData từ dạng JSON list
+// 	var keysInIndex []string
+// 	if err := json.Unmarshal(keys, &keysInIndex); err != nil {
+// 		return nil, fmt.Errorf("failed to parse index data: %v", err)
+// 	}
+
+// 	return append(keysInIndex, key), nil
+// }
 
 // Hàm lấy value từ input
 func (iw *IndexWrapper) getValueFromInput(input map[string]interface{}) interface{} {
@@ -267,20 +339,50 @@ func (iw *IndexWrapper) checkUniqueConstraints(input map[string]interface{}) err
 	// Loại index có nhiều hơn 2 field, contruct value từ các field
 	value := iw.getValueFromInput(input)
 
-	// Lấy index data trong badger theo key <index-id>||<value>
-	indexData, err := iw.BadgerService.Get([]byte(fmt.Sprintf("%d||%v", iw.Index.ID, value)))
+	// Lấy index data trong bbolt theo bucket:key <index-id>||<value>
+	indexData, err := iw.BboltService.GetAndParseAsArrayString([]byte(fmt.Sprintf("%d", iw.Index.ID)), []byte(value.(string)))
 	if err != nil {
-		// Nếu không tìm thấy index data, không cần kiểm tra ràng buộc
-		if err == badger.ErrKeyNotFound {
+		// Nếu lỗi là không tìm thấy key, không cần kiểm tra ràng buộc
+		//  key huy4 not found in bucket 10
+		if err.Error() == fmt.Sprintf("key %s not found in bucket %d", value, iw.Index.ID) {
+			return nil
+		}
+		// Hoặc lỗi không tìm thấy bucket, không cần kiểm tra ràng buộc
+		// bucket 10 not found
+		if err.Error() == fmt.Sprintf("bucket %d not found", iw.Index.ID) {
 			return nil
 		}
 		return fmt.Errorf("failed to get index data: %v", err)
 	}
+	fmt.Println("DEBUG: checkUniqueConstraints: indexName", iw.Index.Name)
+	fmt.Println("DEBUG: checkUniqueConstraints: input", input)
+	fmt.Println("DEBUG: Index data: ", indexData)
 
-	// kiểm tra xem trong indexData có chứa key của input không
-	// Nếu không có, trả về lỗi
-	if !strings.Contains(string(indexData), input["_key"].(string)) {
+	// indexData Có dạng [key1, key2, key3]
+	// Parse indexData từ dạng JSON list
+	// var keysInIndex []string
+	// if err := json.Unmarshal(indexData, &keysInIndex); err != nil {
+	// 	return fmt.Errorf("failed to parse index data: %v", err)
+	// }
+
+	// Kiểm tra xem trong indexData [key1, key2, key3]
+	// có chứa key của input không
+	inputKey := input["_key"].(string)
+	if !contains(indexData, inputKey) {
+		fmt.Println("DEBUG violates unique constraint")
 		return fmt.Errorf("input violates unique constraint")
 	}
 	return nil
+}
+
+// Hàm phụ trợ để kiểm tra xem một slice có chứa một phần tử cụ thể không
+func contains(slice []string, element string) bool {
+	fmt.Println("DEBUG: Checking if slice contains element", element)
+	for _, e := range slice {
+		fmt.Println("DEBUG: Checking element", e)
+		if e == element {
+			return true
+		}
+	}
+	return false
 }

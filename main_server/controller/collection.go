@@ -80,6 +80,13 @@ func (ctrl *Controller) WriteCollectionHandler(c *gin.Context) {
 		return
 	}
 
+	// kiểm tra key đã tồn tại chưa
+	isExist := collectionWrapper.ExistKey(req["_key"].(string))
+	if isExist {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Key already exists"})
+		return
+	}
+
 	// Thêm collection ID vào dữ liệu
 	req["_collection_id"] = collectionID
 

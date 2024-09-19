@@ -9,6 +9,8 @@ import (
 	"github.com/dgraph-io/badger/v4"
 )
 
+// BadgerService struct đại diện cho một dịch vụ lưu trữ dữ liệu sử dụng Badger
+// Một key có dạng <collection_id>||<key>
 type BadgerService struct {
 	Db *badger.DB
 }

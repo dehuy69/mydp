@@ -31,6 +31,7 @@ func SetupRouter(ctrl *controller.Controller) *gin.Engine {
 
 		publicR.GET("/_internal/debug/getall-badger", ctrl.GetAllBadger)
 		publicR.GET("/_internal/debug/getall-bbolt", ctrl.GetAllBbolt)
+		publicR.GET("/_internal/debug/getall-queue", ctrl.GetAllQueue)
 	}
 
 	return r

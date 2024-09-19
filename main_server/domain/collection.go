@@ -88,7 +88,7 @@ func (cw *CollectionWrapper) Write(input map[string]interface{}) error {
 	for _, index := range cw.Collection.Indexes {
 		// Tạo một instance của IndexWrapper
 		indexWrapper := NewIndexWrapper(&index, cw.SQLiteCatalogService, cw.BadgerService, cw.BboltService)
-		err := indexWrapper.Insert(input)
+		err := indexWrapper.InsertWithCheckingStatus(input)
 		if err != nil {
 			fmt.Println("DEBUG (cw *CollectionWrapper) Write ", err)
 			return fmt.Errorf("failed to insert record into index: %v", err)
@@ -182,4 +182,10 @@ func (cw *CollectionWrapper) CheckIndexConstraints(input map[string]interface{})
 // Tạo key badger
 func (cw *CollectionWrapper) CreateBadgerKey(inputKey string) string {
 	return fmt.Sprintf("%d||%v", cw.Collection.ID, inputKey)
+}
+
+// Kiểm tra exist key
+func (cw *CollectionWrapper) ExistKey(inputKey string) bool {
+	_, err := cw.BadgerService.Get([]byte(cw.CreateBadgerKey(inputKey)))
+	return err == nil
 }

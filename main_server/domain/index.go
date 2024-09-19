@@ -70,10 +70,10 @@ func (iw *IndexWrapper) CreateIndex() error {
 		return fmt.Errorf("failed to get index: %v", err)
 	}
 
-	// Tạo bucket trong bbolt
-	err = iw.BboltService.CreateBucketIfNotExists([]byte(fmt.Sprintf("%d", iw.Index.ID)))
+	// Tạo index trong indexService
+	err = iw.BboltService.CreateIndex(iw.Index)
 	if err != nil {
-		return fmt.Errorf("failed to create bucket: %v", err)
+		return fmt.Errorf("failed to create index: %v", err)
 	}
 
 	// Scan dữ liệu hiện có trong collection, insert vào index
@@ -117,21 +117,17 @@ func (iw *IndexWrapper) scanDataAndInsert() error {
 			item := it.Item()
 			// Lấy giá trị của item và chèn vào index
 			err := item.Value(func(value []byte) error {
-				// Gọi hàm Insert để chèn dữ liệu vào index
+				// Parse giá trị JSON thành `map[string]interface{}`
 				var record map[string]interface{}
 				err := json.Unmarshal(value, &record)
 				if err != nil {
 					return err
 				}
-				// Kiểm tra ràng buộc của index
-				err = iw.CheckIndexConstraints(record)
-				if err != nil {
-					return fmt.Errorf("scanDataAndInsert() failed to check index constraints: %v", err)
-				}
+
 				// Insert record vào index
-				err = iw.insertWithoutCheckingConstraint(record)
+				err = iw.insertWithCheckingConstraint(record)
 				if err != nil {
-					return fmt.Errorf("failed to insert record: %v", err)
+					return fmt.Errorf("failed to insert record: %v. Building index fail", err)
 				}
 				return nil
 			})
@@ -186,16 +182,11 @@ func (iw *IndexWrapper) addCacheToIndex() error {
 		return fmt.Errorf("failed to read cache: %v", err)
 	}
 	for _, record := range data {
-		err := iw.Insert(record)
+		err := iw.insertWithCheckingConstraint(record)
 		if err != nil {
 			return fmt.Errorf("failed to insert record: %v", err)
 		}
 	}
-	// Xóa file cache
-	// cachePath := fmt.Sprintf("data/cache/collection_%s/index_%s/data.json", iw.Index.Collection.Name, iw.Index.Name)
-	// if err := os.Remove(cachePath); err != nil {
-	// 	return fmt.Errorf("failed to remove cache file: %v", err)
-	// }
 	return nil
 }
 
@@ -209,7 +200,7 @@ func (iw *IndexWrapper) Query(value interface{}) (map[string]interface{}, error)
 // Bucket    || Key
 // <index-id>||<value> chứa các keys
 
-func (iw *IndexWrapper) Insert(input map[string]interface{}) error {
+func (iw *IndexWrapper) InsertWithCheckingStatus(input map[string]interface{}) error {
 	// input phải có trường _key
 	if _, ok := input["_key"]; !ok {
 		return fmt.Errorf("input must contain a '_key' field")
@@ -220,22 +211,16 @@ func (iw *IndexWrapper) Insert(input map[string]interface{}) error {
 		return nil
 	}
 
-	// Kiểm tra constraints của index
-	if err := iw.CheckIndexConstraints(input); err != nil {
-		fmt.Println("DEBUG: CheckIndexConstraints failed")
-		return err
-	}
-
 	// Nếu trạng thái status của index là building, thì cache lại trong data/cache/collection_<collection_name>/index_<index_name>/data.json
 	if iw.Index.Status == models.IndexStatusBuilding {
 		fmt.Println("DEBUG: Index is building")
 		return iw.insertToCache(input)
 	}
 
-	return iw.insertWithoutCheckingConstraint(input)
+	return iw.insertWithCheckingConstraint(input)
 }
 
-func (iw *IndexWrapper) insertWithoutCheckingConstraint(input map[string]interface{}) error {
+func (iw *IndexWrapper) insertWithCheckingConstraint(input map[string]interface{}) error {
 	// Lấy giá trị của value
 	// Nếu index là loại hỗn hợp (type là hash)), thì giá trị value sẽ là một tổ hợp md5 %s%s của các trường khác nhau
 	// Nếu index là loại đơn, thì giá trị value sẽ là giá trị của trường đó
@@ -244,40 +229,19 @@ func (iw *IndexWrapper) insertWithoutCheckingConstraint(input map[string]interfa
 	// Lấy giá trị của key. Là giá trị của trường _key trong input
 	key := input["_key"].(string)
 
-	// Lấy index data từ bbolt
-	indexData, err := iw.BboltService.GetAndParseAsArrayString([]byte(fmt.Sprintf("%d", iw.Index.ID)), []byte(fmt.Sprintf("%v", value)))
+	// check constraints
+	err := iw.CheckIndexConstraints(input)
 	if err != nil {
-		// Nếu không tìm thấy index data, tạo mới
-		if err.Error() == fmt.Sprintf("key %s not found in bucket %d", value, iw.Index.ID) {
-			indexData = []string{}
-		} else {
-			return fmt.Errorf("failed to get index data: %v", err)
-		}
+		return fmt.Errorf("failed to check index constraints: %v", err)
 	}
 
-	// Ép thành mảng hoặc set, thêm key vào mảng/set, ghi lại vào indexData
-	// indexData -> [key1, key2, key3]
-	// Nếu index là unique, ép thành set
-	if iw.Index.IsUnique {
-		indexDataSet := mapset.NewSet[string](
-			indexData...,
-		)
-		indexDataSet.Add(key)
-		indexData = indexDataSet.ToSlice()
-	} else {
-		indexData = append(indexData, key)
-	}
-
-	idxbucket := []byte(fmt.Sprintf("%d", iw.Index.ID))
-	idxkey := []byte(fmt.Sprintf("%v", value))
-
-	err = iw.BboltService.SetArrayString(idxbucket, idxkey, indexData)
+	// Thêm key vào node
+	err = iw.AddKeyToNode(value, key)
 	if err != nil {
-		return fmt.Errorf("failed to write to bbolt: %v", err)
+		return fmt.Errorf("failed to add key to node: %v", err)
 	}
 
 	return nil
-
 }
 
 func (iw *IndexWrapper) insertToCache(input map[string]interface{}) error {
@@ -339,50 +303,154 @@ func (iw *IndexWrapper) checkUniqueConstraints(input map[string]interface{}) err
 	// Loại index có nhiều hơn 2 field, contruct value từ các field
 	value := iw.getValueFromInput(input)
 
-	// Lấy index data trong bbolt theo bucket:key <index-id>||<value>
-	indexData, err := iw.BboltService.GetAndParseAsArrayString([]byte(fmt.Sprintf("%d", iw.Index.ID)), []byte(value.(string)))
-	if err != nil {
-		// Nếu lỗi là không tìm thấy key, không cần kiểm tra ràng buộc
-		//  key huy4 not found in bucket 10
-		if err.Error() == fmt.Sprintf("key %s not found in bucket %d", value, iw.Index.ID) {
-			return nil
-		}
-		// Hoặc lỗi không tìm thấy bucket, không cần kiểm tra ràng buộc
-		// bucket 10 not found
-		if err.Error() == fmt.Sprintf("bucket %d not found", iw.Index.ID) {
-			return nil
-		}
-		return fmt.Errorf("failed to get index data: %v", err)
-	}
-	fmt.Println("DEBUG: checkUniqueConstraints: indexName", iw.Index.Name)
-	fmt.Println("DEBUG: checkUniqueConstraints: input", input)
-	fmt.Println("DEBUG: Index data: ", indexData)
-
-	// indexData Có dạng [key1, key2, key3]
-	// Parse indexData từ dạng JSON list
-	// var keysInIndex []string
-	// if err := json.Unmarshal(indexData, &keysInIndex); err != nil {
-	// 	return fmt.Errorf("failed to parse index data: %v", err)
-	// }
-
-	// Kiểm tra xem trong indexData [key1, key2, key3]
-	// có chứa key của input không
 	inputKey := input["_key"].(string)
-	if !contains(indexData, inputKey) {
-		fmt.Println("DEBUG violates unique constraint")
+
+	// Kiểm tra node, nếu node không tồn tại, không cần kiểm tra ràng buộc
+	nodeExist, err := iw.NodeExist(value)
+	if err != nil {
+		return fmt.Errorf("failed to check node exist: %v", err)
+	}
+	if !nodeExist {
+		return nil
+	}
+
+	// So sánh inputKey với các key trong node, nếu tìm thấy inputKey trong node.keys, thì thỏa ràng buộc
+	keyExist, err := iw.KeyExist(value, inputKey)
+	if err != nil {
+		return fmt.Errorf("failed to check key exist: %v", err)
+	}
+	if keyExist {
+		return nil
+	} else {
 		return fmt.Errorf("input violates unique constraint")
 	}
+}
+
+// Thêm 1 key vào node, với value là giá trị của key
+func (iw *IndexWrapper) AddKeyToNode(value interface{}, key string) error {
+	// filename
+	filename := iw.BboltService.GetFileNameFromIndex(iw.Index)
+
+	// Ép kiểu value
+	valueAsBytes, err := InterfaceToBytes(value)
+	if err != nil {
+		fmt.Println("Failed to convert value to bytes: ", err)
+		return err
+	}
+
+	isNodeExist, err := iw.NodeExist(value)
+	if err != nil {
+		fmt.Println("Failed to check node exist: ", err)
+		return err
+	}
+
+	if isNodeExist {
+		// Lấy node
+		node, err := iw.BboltService.GetAndParseAsNode(filename, []byte("default"), valueAsBytes)
+		if err != nil {
+			fmt.Println("Failed to get node: ", err)
+			return err
+		}
+
+		// Thêm key vào node
+		node.Keys.Add(key)
+
+		// Ghi lại node
+		err = iw.BboltService.SetNode(filename, []byte("default"), node)
+		if err != nil {
+			fmt.Println("Failed to set node: ", err)
+			return err
+		}
+	} else {
+		// Tạo node mới
+		node := &models.Node{
+			Value: valueAsBytes,
+			Keys:  mapset.NewSet[string](),
+		}
+		node.Keys.Add(key)
+		// Ghi node
+		err = iw.BboltService.SetNode(filename, []byte("default"), node)
+		if err != nil {
+			fmt.Println("Failed to set node: ", err)
+			return err
+		}
+	}
+
 	return nil
 }
 
-// Hàm phụ trợ để kiểm tra xem một slice có chứa một phần tử cụ thể không
-func contains(slice []string, element string) bool {
-	fmt.Println("DEBUG: Checking if slice contains element", element)
-	for _, e := range slice {
-		fmt.Println("DEBUG: Checking element", e)
-		if e == element {
-			return true
-		}
+// Kiểm tra node exist
+func (iw *IndexWrapper) NodeExist(value interface{}) (bool, error) {
+	// filename
+	filename := iw.BboltService.GetFileNameFromIndex(iw.Index)
+
+	// Ép kiểu value
+	valueAsBytes, err := InterfaceToBytes(value)
+	if err != nil {
+		fmt.Println("Failed to convert value to bytes: ", err)
+		return false, err
 	}
-	return false
+
+	// Lấy node
+	_, err = iw.BboltService.GetAndParseAsNode(filename, []byte("default"), valueAsBytes)
+	// Nếu mã lỗi là 'key %v not found', thì node không tồn tại
+	if err != nil && strings.Contains(err.Error(), fmt.Sprintf("key %v not found", value)) {
+		return false, nil
+	}
+	if err != nil {
+		fmt.Println("Failed to get node: ", err)
+		return false, err
+	}
+
+	return true, nil
+}
+
+// Kiểm tra key có tồn tại trong node.keys không
+func (iw *IndexWrapper) KeyExist(value interface{}, key string) (bool, error) {
+	// filename
+	filename := iw.BboltService.GetFileNameFromIndex(iw.Index)
+
+	// Ép kiểu value
+	valueAsBytes, err := InterfaceToBytes(value)
+	if err != nil {
+		fmt.Println("Failed to convert value to bytes: ", err)
+		return false, err
+	}
+
+	// Lấy node
+	node, err := iw.BboltService.GetAndParseAsNode(filename, []byte("default"), valueAsBytes)
+	if err != nil {
+		fmt.Println("Failed to get node: ", err)
+		return false, err
+	}
+
+	// Kiểm tra nếu node không tồn tại
+	if node == nil {
+		return false, nil
+	}
+
+	// Kiểm tra nếu key tồn tại trong node.Keys
+	if node.Keys.Contains(key) {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+// InterfaceToBytes chuyển đổi một interface{} thành []byte dựa trên kiểu của nó
+func InterfaceToBytes(value interface{}) ([]byte, error) {
+	switch v := value.(type) {
+	case int:
+		// Chuyển đổi int thành []byte
+		return []byte(fmt.Sprintf("%d", v)), nil
+	case float64:
+		// Chuyển đổi float64 thành []byte
+		return []byte(fmt.Sprintf("%f", v)), nil
+	case string:
+		// Chuyển đổi string trực tiếp thành []byte
+		return []byte(v), nil
+	default:
+		// Trường hợp không hỗ trợ kiểu dữ liệu
+		return nil, fmt.Errorf("unsupported type: %T", value)
+	}
 }

@@ -25,3 +25,8 @@ func (ctrl *Controller) GetAllBbolt(c *gin.Context) {
 	c.JSON(http.StatusOK, data)
 
 }
+
+func (ctrl *Controller) GetAllQueue(c *gin.Context) {
+	data := ctrl.QueueManager.GetAllCurrentQueueAndTheirFirstData()
+	c.JSON(http.StatusOK, data)
+}

@@ -1,8 +1,6 @@
 package service
 
 import (
-	"fmt"
-
 	"github.com/gammazero/deque"
 )
 
@@ -49,7 +47,6 @@ func (qm *QueueManager) GetFromQueue(name string) map[string]interface{} {
 
 func (qm *QueueManager) GetAllCurrentQueueAndTheirFirstData() map[string]map[string]interface{} {
 	result := make(map[string]map[string]interface{})
-	fmt.Println("DEBUG: GetAllCurrentQueueAndTheirFirstData queues", qm.queues)
 	for name, queue := range qm.queues {
 		result[name] = queue.Front()
 	}
